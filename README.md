@@ -67,6 +67,11 @@ GET /api/analysis/sticky                   # Sticky TVL
 GET /api/analysis/depositors/:address      # Depositor lookup
 ```
 
+## Known Limitations
+
+- **Velo/Aero LP pricing is approximate**: Velodrome (Optimism) and Aerodrome (Base) LP token prices are derived from current on-chain reserves and current underlying token prices. When used to reprice historical harvest reports, this is an approximation — it does not reflect reserves or token prices at the time of each harvest. Accurate historical LP pricing would require archive RPC nodes and per-block reserve reads.
+- **~209 reports remain unpriced** (~0.5%): Exotic tokens with no DefiLlama price and no usable snapshot fallback (e.g. defunct stablecoins, delisted tokens).
+
 ## Environment
 
 Copy `.env.example` and fill in RPC URLs. Only `ETH_RPC_URL` is strictly required — other chain RPCs are needed for V2 fee reads and curation vault discovery.

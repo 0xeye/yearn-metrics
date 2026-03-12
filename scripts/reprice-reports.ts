@@ -7,6 +7,12 @@
  *   2. Fallback: vault snapshot price (TVL/totalAssets) when provider has no data
  *
  * To use a different pricing backend, swap the provider in main().
+ *
+ * CAVEAT: The snapshot fallback uses the latest snapshot TVL/totalAssets ratio
+ * as a proxy for the token price at the time of each report. For standard ERC-20
+ * assets this is usually close, but for Velodrome/Aerodrome LP tokens (priced via
+ * current on-chain reserves in fetch-kong.ts), this is an approximation — it does
+ * not reflect historical reserves or token prices at the time of the harvest.
  */
 import { db, vaults, vaultSnapshots, strategyReports } from "@yearn-tvl/db";
 import { eq, and, desc, sql, isNotNull } from "drizzle-orm";

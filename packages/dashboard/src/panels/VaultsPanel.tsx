@@ -25,7 +25,7 @@ interface Overlap {
 }
 
 const CHAIN_NAMES: Record<number, string> = {
-  1: "Ethereum", 137: "Polygon", 42161: "Arbitrum", 8453: "Base", 100: "Gnosis", 747474: "Katana", 999: "Hyperliquid",
+  1: "Ethereum", 137: "Polygon", 42161: "Arbitrum", 8453: "Base", 100: "Gnosis", 747474: "Katana", 999: "Hyperliquid", 80094: "Berachain", 146: "Sonic",
 };
 
 const EXPLORER_URLS: Record<number, string> = {
@@ -38,6 +38,8 @@ const EXPLORER_URLS: Record<number, string> = {
   100: "https://gnosisscan.io/address",
   747474: "https://katanascan.com/address",
   999: "https://hyperevmscan.io/address",
+  80094: "https://berascan.com/address",
+  146: "https://sonicscan.org/address",
 };
 
 export function VaultsPanel() {

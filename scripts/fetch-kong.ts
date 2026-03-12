@@ -3,9 +3,10 @@
  * Categories: v2 (apiVersion 0.4.x) and v3 (v3=true). Curation vaults are NOT in Kong.
  */
 import { db, vaults, vaultSnapshots, strategies, strategyDebts, feeConfigs } from "@yearn-tvl/db";
-import { KONG_API_URL, IGNORED_VAULTS } from "@yearn-tvl/shared";
+import { KONG_API_URL, IGNORED_VAULTS, CHAIN_PREFIXES } from "@yearn-tvl/shared";
 import type { KongVault } from "@yearn-tvl/shared";
 import { eq, and } from "drizzle-orm";
+import { priceViaSugarOracle } from "./lib/velo-oracle.js";
 
 const VAULTS_QUERY = `
   query {
@@ -193,6 +194,129 @@ async function upsertFees(vaultId: number, kongVault: KongVault) {
   }
 }
 
+/**
+ * Fallback pricing for vaults where Kong returns tvl.close = 0 but totalAssets > 0.
+ * Fetches current token prices from DefiLlama and computes TVL = totalAssets / 10^decimals * price.
+ */
+async function priceMissingTvl(zeroTvlVaults: { vaultId: number; kongVault: KongVault }[]) {
+  if (zeroTvlVaults.length === 0) return 0;
+
+  // Build unique token keys for batch price fetch
+  const tokens = zeroTvlVaults
+    .map((v) => {
+      const prefix = CHAIN_PREFIXES[v.kongVault.chainId];
+      if (!prefix || !v.kongVault.asset?.address) return null;
+      return { key: `${prefix}:${v.kongVault.asset.address}`, vault: v };
+    })
+    .filter(Boolean) as { key: string; vault: { vaultId: number; kongVault: KongVault } }[];
+
+  if (tokens.length === 0) return 0;
+
+  const coinKeys = [...new Set(tokens.map((t) => t.key))].join(",");
+  let prices: Record<string, { price: number }> = {};
+
+  try {
+    const res = await fetch(`https://coins.llama.fi/prices/current/${coinKeys}`);
+    if (res.ok) {
+      const data = (await res.json()) as { coins: Record<string, { price: number }> };
+      prices = data.coins;
+    }
+  } catch {
+    console.warn("Failed to fetch fallback prices from DefiLlama");
+    return 0;
+  }
+
+  let fixed = 0;
+  for (const { key, vault } of tokens) {
+    const priceInfo = prices[key];
+    if (!priceInfo || priceInfo.price <= 0) continue;
+
+    const decimals = vault.kongVault.asset.decimals;
+    const totalAssets = BigInt(vault.kongVault.totalAssets || "0");
+    if (totalAssets === 0n) continue;
+
+    const tvlUsd = Number(totalAssets) / 10 ** decimals * priceInfo.price;
+    if (tvlUsd <= 0) continue;
+
+    // Update the most recent snapshot for this vault
+    const latestSnapshot = await db.query.vaultSnapshots.findFirst({
+      where: eq(vaultSnapshots.vaultId, vault.vaultId),
+      orderBy: (s, { desc }) => [desc(s.id)],
+    });
+
+    if (latestSnapshot) {
+      await db
+        .update(vaultSnapshots)
+        .set({ tvlUsd })
+        .where(eq(vaultSnapshots.id, latestSnapshot.id));
+      console.log(`  Priced ${vault.kongVault.name} (${vault.kongVault.chainId}): $${tvlUsd.toFixed(0)}`);
+      fixed++;
+    }
+  }
+
+  return fixed;
+}
+
+/**
+ * Fallback 2: Use Velodrome/Aerodrome Sugar Oracle for LP tokens on Optimism/Base
+ * that DefiLlama can't price.
+ */
+async function priceViaSugarOracleFallback(
+  veloVaults: { vaultId: number; kongVault: KongVault }[],
+) {
+  // Group by chain
+  const byChain = new Map<number, typeof veloVaults>();
+  for (const v of veloVaults) {
+    const chain = v.kongVault.chainId;
+    if (!byChain.has(chain)) byChain.set(chain, []);
+    byChain.get(chain)!.push(v);
+  }
+
+  let fixed = 0;
+  for (const [chainId, chainVaults] of byChain) {
+    // Only try vaults whose latest snapshot is still 0
+    const toPrice: typeof chainVaults = [];
+    for (const v of chainVaults) {
+      const snap = await db.query.vaultSnapshots.findFirst({
+        where: eq(vaultSnapshots.vaultId, v.vaultId),
+        orderBy: (s, { desc }) => [desc(s.id)],
+      });
+      if (snap && (!snap.tvlUsd || snap.tvlUsd === 0)) {
+        toPrice.push(v);
+      }
+    }
+    if (toPrice.length === 0) continue;
+
+    const assetAddresses = toPrice.map((v) => v.kongVault.asset?.address).filter(Boolean) as string[];
+    const prices = await priceViaSugarOracle(chainId, assetAddresses);
+
+    for (const v of toPrice) {
+      const assetAddr = v.kongVault.asset?.address?.toLowerCase();
+      if (!assetAddr) continue;
+      const price = prices.get(assetAddr);
+      if (!price || price <= 0) continue;
+
+      const decimals = v.kongVault.asset.decimals;
+      const totalAssets = BigInt(v.kongVault.totalAssets || "0");
+      if (totalAssets === 0n) continue;
+
+      const tvlUsd = Number(totalAssets) / 10 ** decimals * price;
+      if (tvlUsd <= 0) continue;
+
+      const snap = await db.query.vaultSnapshots.findFirst({
+        where: eq(vaultSnapshots.vaultId, v.vaultId),
+        orderBy: (s, { desc }) => [desc(s.id)],
+      });
+      if (snap) {
+        await db.update(vaultSnapshots).set({ tvlUsd }).where(eq(vaultSnapshots.id, snap.id));
+        console.log(`  Priced ${v.kongVault.name} (${chainId}): $${tvlUsd.toFixed(0)}`);
+        fixed++;
+      }
+    }
+  }
+  return fixed;
+}
+
 export async function fetchAndStoreKongData() {
   console.log("Fetching vaults from Kong API...");
   const kongVaults = await fetchKongVaults();
@@ -200,6 +324,7 @@ export async function fetchAndStoreKongData() {
 
   let stored = 0;
   let skipped = 0;
+  const zeroTvlVaults: { vaultId: number; kongVault: KongVault }[] = [];
 
   for (const kv of kongVaults) {
     if (isIgnored(kv.address, kv.chainId)) {
@@ -212,9 +337,34 @@ export async function fetchAndStoreKongData() {
     await upsertStrategiesAndDebts(vaultId, kv);
     await upsertFees(vaultId, kv);
     stored++;
+
+    // Track vaults with 0 TVL but non-zero totalAssets for fallback pricing
+    const tvl = kv.tvl?.close ?? 0;
+    const totalAssets = BigInt(kv.totalAssets || "0");
+    if (tvl === 0 && totalAssets > 0n) {
+      zeroTvlVaults.push({ vaultId, kongVault: kv });
+    }
   }
 
   console.log(`Stored ${stored} vaults, skipped ${skipped} ignored`);
+
+  // Fallback 1: price vaults via DefiLlama current prices
+  if (zeroTvlVaults.length > 0) {
+    console.log(`\nFallback 1 (DefiLlama) for ${zeroTvlVaults.length} vaults with 0 TVL...`);
+    const fixed = await priceMissingTvl(zeroTvlVaults);
+    console.log(`Priced ${fixed}/${zeroTvlVaults.length} vaults via DefiLlama`);
+  }
+
+  // Fallback 2: Sugar Oracle for Velo/Aero LP tokens still at 0 (chains 10, 8453)
+  const stillZero = zeroTvlVaults.filter((v) => {
+    return (v.kongVault.chainId === 10 || v.kongVault.chainId === 8453);
+  });
+  if (stillZero.length > 0) {
+    console.log(`\nFallback 2 (Sugar Oracle) for ${stillZero.length} Optimism/Base vaults...`);
+    const fixed = await priceViaSugarOracleFallback(stillZero);
+    console.log(`Priced ${fixed}/${stillZero.length} vaults via Sugar Oracle`);
+  }
+
   return { stored, skipped, total: kongVaults.length };
 }
 

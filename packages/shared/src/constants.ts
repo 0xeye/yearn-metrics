@@ -15,6 +15,8 @@ export const CHAIN_IDS = {
   gnosis: 100,
   katana: 747474,
   hyperliquid: 999,
+  berachain: 80094,
+  sonic: 146,
 } as const;
 
 export const CHAIN_NAMES: Record<number, string> = {
@@ -27,6 +29,8 @@ export const CHAIN_NAMES: Record<number, string> = {
   100: "Gnosis",
   747474: "Katana",
   999: "Hyperliquid",
+  80094: "Berachain",
+  146: "Sonic",
 };
 
 /** V1 vault addresses (Ethereum only) — from DefiLlama yearn adapter */

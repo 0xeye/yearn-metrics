@@ -48,7 +48,7 @@ interface StickyResult {
 }
 
 const CHAIN_NAMES: Record<number, string> = {
-  1: "ETH", 137: "POLY", 42161: "ARB", 8453: "BASE", 100: "GNO", 747474: "KAT", 999: "HL",
+  1: "ETH", 137: "POLY", 42161: "ARB", 8453: "BASE", 100: "GNO", 747474: "KAT", 999: "HL", 80094: "BERA", 146: "SONIC",
 };
 
 const EXPLORER_URLS: Record<number, string> = {
@@ -61,6 +61,8 @@ const EXPLORER_URLS: Record<number, string> = {
   100: "https://gnosisscan.io/address",
   747474: "https://katanascan.com/address",
   999: "https://hyperevmscan.io/address",
+  80094: "https://berascan.com/address",
+  146: "https://sonicscan.org/address",
 };
 
 function ExplorerLink({ address, chainId }: { address: string; chainId: number }) {

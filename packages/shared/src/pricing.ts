@@ -20,7 +20,7 @@ export interface HistoricalPriceProvider {
   ): Promise<Map<string, number>>;
 }
 
-const CHAIN_PREFIXES: Record<number, string> = {
+export const CHAIN_PREFIXES: Record<number, string> = {
   1: "ethereum",
   10: "optimism",
   137: "polygon",
@@ -28,6 +28,8 @@ const CHAIN_PREFIXES: Record<number, string> = {
   42161: "arbitrum",
   747474: "katana",
   999: "hyperliquid",
+  80094: "berachain",
+  146: "sonic",
 };
 
 /**
