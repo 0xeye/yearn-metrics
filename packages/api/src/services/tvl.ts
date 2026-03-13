@@ -6,7 +6,7 @@
 import { db, vaults, vaultSnapshots, strategies, strategyDebts } from "@yearn-tvl/db";
 import { eq, and, desc, sql } from "drizzle-orm";
 import type { TvlSummary, VaultTvl, OverlapDetail, VaultCategory } from "@yearn-tvl/shared";
-import { CHAIN_NAMES } from "@yearn-tvl/shared";
+import { CHAIN_NAMES, STRATEGY_OVERLAP_REGISTRY } from "@yearn-tvl/shared";
 
 /** Get the latest snapshot for each vault */
 const getLatestSnapshots = async () => {
@@ -29,7 +29,7 @@ const getLatestSnapshots = async () => {
     .innerJoin(vaults, eq(vaultSnapshots.vaultId, vaults.id));
 };
 
-/** Detect allocator→strategy/vault overlap */
+/** Detect vault→vault overlap (auto + registry-based) */
 const computeOverlap = async (): Promise<OverlapDetail[]> => {
   const allVaults = await db.select({
     id: vaults.id,
@@ -43,23 +43,17 @@ const computeOverlap = async (): Promise<OverlapDetail[]> => {
     allVaults.map((v) => [`${v.chainId}:${v.address.toLowerCase()}`, v]),
   );
 
-  const allocatorVaults = await db.select({
-    id: vaults.id,
-    address: vaults.address,
-    chainId: vaults.chainId,
-    category: vaults.category,
-    isRetired: vaults.isRetired,
-  }).from(vaults).where(eq(vaults.vaultType, 1));
+  // Auto-detection: check ALL active vaults (not just vaultType=1 allocators)
+  const activeVaults = allVaults.filter((v) => !v.isRetired);
+  const autoDetectedStratKeys = new Set<string>();
 
-  const activeAllocators = allocatorVaults.filter((a) => !a.isRetired);
-
-  const results = await Promise.all(
-    activeAllocators.map(async (allocator) => {
-      const vaultStrategies = await db.select().from(strategies).where(eq(strategies.vaultId, allocator.id));
+  const autoResults = await Promise.all(
+    activeVaults.map(async (vault) => {
+      const vaultStrategies = await db.select().from(strategies).where(eq(strategies.vaultId, vault.id));
 
       const stratOverlaps = await Promise.all(
         vaultStrategies.map(async (strat) => {
-          const targetVault = vaultByAddress.get(`${allocator.chainId}:${strat.address.toLowerCase()}`);
+          const targetVault = vaultByAddress.get(`${vault.chainId}:${strat.address.toLowerCase()}`);
           if (!targetVault) return null;
 
           const [latestDebt] = await db
@@ -71,22 +65,75 @@ const computeOverlap = async (): Promise<OverlapDetail[]> => {
 
           if (!latestDebt?.currentDebtUsd || latestDebt.currentDebtUsd <= 0) return null;
 
+          autoDetectedStratKeys.add(`${vault.chainId}:${strat.address.toLowerCase()}`);
+
           return {
-            sourceVault: allocator.address,
+            sourceVault: vault.address,
             targetVault: targetVault.address,
             strategyAddress: strat.address,
             overlapUsd: latestDebt.currentDebtUsd,
-            sourceCategory: allocator.category as VaultCategory,
+            sourceCategory: vault.category as VaultCategory,
             targetCategory: targetVault.category as VaultCategory,
-          } satisfies OverlapDetail;
+            detectionMethod: "auto" as const,
+          };
         }),
       );
 
-      return stratOverlaps.filter((o): o is OverlapDetail => o !== null);
+      return stratOverlaps.filter((o) => o !== null);
     }),
   );
 
-  return results.flat();
+  // Registry-based: intermediary depositor contracts not caught by auto-detection
+  const registryResults = await Promise.all(
+    STRATEGY_OVERLAP_REGISTRY.map(async (entry) => {
+      const key = `${entry.chainId}:${entry.strategyAddress.toLowerCase()}`;
+      if (autoDetectedStratKeys.has(key)) return null;
+
+      const targetVault = vaultByAddress.get(`${entry.chainId}:${entry.targetVaultAddress.toLowerCase()}`);
+      if (!targetVault) return null;
+
+      // Find strategy in DB by address + chainId
+      const [strat] = await db
+        .select()
+        .from(strategies)
+        .where(and(
+          eq(strategies.address, entry.strategyAddress),
+          eq(strategies.chainId, entry.chainId),
+        ))
+        .limit(1);
+
+      if (!strat) return null;
+
+      const [latestDebt] = await db
+        .select()
+        .from(strategyDebts)
+        .where(eq(strategyDebts.strategyId, strat.id))
+        .orderBy(desc(strategyDebts.id))
+        .limit(1);
+
+      if (!latestDebt?.currentDebtUsd || latestDebt.currentDebtUsd <= 0) return null;
+
+      // Find the source vault (the vault that uses this strategy)
+      const sourceVault = allVaults.find((v) => v.id === strat.vaultId);
+      if (!sourceVault) return null;
+
+      return {
+        sourceVault: sourceVault.address,
+        targetVault: targetVault.address,
+        strategyAddress: strat.address,
+        overlapUsd: latestDebt.currentDebtUsd,
+        sourceCategory: sourceVault.category as VaultCategory,
+        targetCategory: targetVault.category as VaultCategory,
+        detectionMethod: "registry" as const,
+        label: entry.label,
+      };
+    }),
+  );
+
+  return [
+    ...autoResults.flat(),
+    ...registryResults.filter((o) => o !== null),
+  ] as OverlapDetail[];
 };
 
 export const calculateTvl = async (): Promise<TvlSummary> => {
@@ -99,7 +146,7 @@ export const calculateTvl = async (): Promise<TvlSummary> => {
 
   const agg = snapshots.reduce(
     (acc, { vault, snapshot }) => {
-      const tvl = snapshot.tvlUsd ?? 0;
+      const tvl = typeof snapshot.tvlUsd === "number" ? snapshot.tvlUsd : 0;
       const cat = vault.category as VaultCategory;
       const chainName = CHAIN_NAMES[vault.chainId] || `Chain ${vault.chainId}`;
 

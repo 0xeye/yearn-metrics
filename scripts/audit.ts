@@ -10,7 +10,7 @@
  */
 import { db, vaults, vaultSnapshots, strategies, strategyDebts } from "@yearn-tvl/db";
 import { eq, and, sql } from "drizzle-orm";
-import { CHAIN_NAMES } from "@yearn-tvl/shared";
+import { CHAIN_NAMES, STRATEGY_OVERLAP_REGISTRY } from "@yearn-tvl/shared";
 
 // --- Types ---
 
@@ -18,6 +18,8 @@ interface StrategyInfo {
   address: string;
   name: string | null;
   debtUsd: number;
+  overlap?: "auto" | "registry";
+  overlapTarget?: string; // target vault name for overlap display
 }
 
 interface VaultInfo {
@@ -97,16 +99,43 @@ async function buildAudit(): Promise<ChainInfo[]> {
       eq(strategyDebts.id, latestDebtIds.maxId),
     ));
 
+  // Build overlap detection maps
+  const vaultAddrSet = new Set(rows.map((r) => `${r.chainId}:${r.address.toLowerCase()}`));
+  const registryByKey = new Map(
+    STRATEGY_OVERLAP_REGISTRY.map((e) => [
+      `${e.chainId}:${e.strategyAddress.toLowerCase()}`,
+      e,
+    ]),
+  );
+
   const debtsByVault = new Map<number, StrategyInfo[]>();
   for (const d of debtRows) {
     if (!debtsByVault.has(d.vaultId)) debtsByVault.set(d.vaultId, []);
-    const resolvedName = d.name
-      || vaultNameByAddr.get(`${d.chainId}:${d.address.toLowerCase()}`)
-      || null;
+    const key = `${d.chainId}:${d.address.toLowerCase()}`;
+
+    let overlap: "auto" | "registry" | undefined;
+    let overlapTarget: string | undefined;
+    let resolvedName = d.name;
+
+    if (vaultAddrSet.has(key)) {
+      overlap = "auto";
+      overlapTarget = vaultNameByAddr.get(key) ?? undefined;
+      resolvedName = resolvedName || overlapTarget || null;
+    } else {
+      const regEntry = registryByKey.get(key);
+      if (regEntry) {
+        overlap = "registry";
+        overlapTarget = vaultNameByAddr.get(`${regEntry.chainId}:${regEntry.targetVaultAddress.toLowerCase()}`) ?? undefined;
+        resolvedName = resolvedName || regEntry.label || null;
+      }
+    }
+
     debtsByVault.get(d.vaultId)!.push({
       address: d.address,
       name: resolvedName,
       debtUsd: d.debtUsd ?? 0,
+      overlap,
+      overlapTarget,
     });
   }
 
@@ -233,6 +262,14 @@ interface Opts {
   visibleCats: Set<DisplayCat>;
 }
 
+function computeOverlapTotal(chains: ChainInfo[], opts: Opts): number {
+  return chains
+    .flatMap((c) => applyFilters(c, opts))
+    .flatMap((v) => v.strategies)
+    .filter((s) => s.overlap && s.debtUsd > 0)
+    .reduce((sum, s) => sum + s.debtUsd, 0);
+}
+
 function applyFilters(chain: ChainInfo, opts: Opts): VaultInfo[] {
   let out = opts.includeRetired ? chain.vaults : chain.vaults.filter((v) => !v.isRetired);
   out = out.filter((v) => v.tvlUsd >= opts.minTvl);
@@ -347,12 +384,23 @@ function renderRow(
     const strat = vault.strategies[row.stratIdx!];
     const isLast = row.stratIdx === vault.strategies.length - 1;
     const prefix = isLast ? "└─" : "├─";
+
+    // Build overlap tag: [overlap → TargetVault] or [registry → TargetVault]
+    let overlapTag = "";
+    let tagLen = 0;
+    if (strat.overlap) {
+      const target = strat.overlapTarget || "?";
+      const method = strat.overlap === "registry" ? "registry" : "overlap";
+      overlapTag = ` ${YELLOW}[${method} → ${target}]${reset}`;
+      tagLen = method.length + target.length + 6; // [ → ] + spaces
+    }
+
+    const maxName = width - 35 - tagLen;
     const stratName = strat.name || `${strat.address.slice(0, 42)}`;
-    const maxName = width - 35;
     const truncName = stratName.length > maxName ? stratName.slice(0, maxName - 1) + "…" : stratName;
 
     const tvl = padLeft(colorTvl(strat.debtUsd), TVL_COL);
-    return `${highlight}           ${DIM}${prefix}${reset} ${DIM}${truncName.padEnd(maxName)}${reset} ${tvl}${RESET}`;
+    return `${highlight}           ${DIM}${prefix}${reset} ${DIM}${truncName.padEnd(maxName)}${reset}${overlapTag} ${tvl}${RESET}`;
   }
 
   return "";
@@ -395,6 +443,8 @@ async function runTui(chains: ChainInfo[], baseOpts: { includeRetired: boolean; 
       grandTotal += fv.reduce((s, v) => s + v.tvlUsd, 0);
       vaultCount += fv.length;
     }
+    const overlapTotal = computeOverlapTotal(chains, opts);
+    const adjustedTotal = grandTotal - overlapTotal;
 
     // Draw
     process.stdout.write(`${ESC}H${ESC}J`); // clear screen
@@ -403,7 +453,8 @@ async function runTui(chains: ChainInfo[], baseOpts: { includeRetired: boolean; 
     const titleText = " Yearn TVL Audit";
     const isFiltered = visibleCats.size < DISPLAY_CATS.length;
     const filterTag = isFiltered ? ` [${[...visibleCats].map((c) => DCAT_SHORT[c]).join("+")}]` : "";
-    const totalText = `Total: ${fmtUsd(grandTotal)}  ${vaultCount} vaults${filterTag}`;
+    const overlapText = overlapTotal > 0 ? `  Overlap: -${fmtUsd(overlapTotal)}` : "";
+    const totalText = `Total: ${fmtUsd(adjustedTotal)}${overlapText}  ${vaultCount} vaults${filterTag}`;
     const gap = Math.max(1, cols - titleText.length - totalText.length - 1);
     process.stdout.write(`${BG_BLUE}${BOLD}${WHITE}${titleText}${" ".repeat(gap)}${totalText} ${RESET}\n`);
 
@@ -547,7 +598,10 @@ function printStatic(chains: ChainInfo[], opts: Opts) {
   for (const c of chains) {
     grandTotal += applyFilters(c, opts).reduce((s, v) => s + v.tvlUsd, 0);
   }
-  console.log(`\n${BOLD}Total: ${colorTvl(grandTotal)}${RESET}`);
+  const overlapTotal = computeOverlapTotal(chains, opts);
+  const adjustedTotal = grandTotal - overlapTotal;
+  const overlapNote = overlapTotal > 0 ? `  ${YELLOW}Overlap: -${fmtUsd(overlapTotal)}${RESET}` : "";
+  console.log(`\n${BOLD}Total: ${colorTvl(adjustedTotal)}${RESET}${overlapNote}`);
 }
 
 // --- CLI ---

@@ -13,6 +13,8 @@ interface VaultTvl {
 
 interface Overlap {
   totalOverlap: number;
+  autoOverlap: number;
+  registryOverlap: number;
   count: number;
   overlaps: Array<{
     sourceVault: string;
@@ -21,6 +23,8 @@ interface Overlap {
     overlapUsd: number;
     sourceCategory: string;
     targetCategory: string;
+    detectionMethod: "auto" | "registry";
+    label?: string;
   }>;
 }
 
@@ -53,9 +57,18 @@ export function VaultsPanel() {
   if (loading) return <div className="loading">Loading vaults...</div>;
   if (!data) return null;
 
+  // Build per-vault overlap map (source vault → total overlap deducted)
+  const vaultOverlapMap = new Map<string, number>();
+  if (overlap) {
+    for (const o of overlap.overlaps) {
+      const key = `${o.sourceVault.toLowerCase()}`;
+      vaultOverlapMap.set(key, (vaultOverlapMap.get(key) || 0) + o.overlapUsd);
+    }
+  }
+
   return (
     <>
-      <div className="card" style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
+      <div className="card" style={{ display: "flex", gap: "1rem", alignItems: "center", flexWrap: "wrap" }}>
         <label style={{ fontSize: "0.85rem" }}>
           <input
             type="checkbox"
@@ -79,6 +92,11 @@ export function VaultsPanel() {
           <option value="curation">Curation</option>
         </select>
         <span className="text-dim" style={{ fontSize: "0.85rem" }}>{data.count} vaults</span>
+        {overlap && overlap.totalOverlap > 0 && (
+          <span className="text-dim" style={{ fontSize: "0.8rem", marginLeft: "auto" }}>
+            <span className="text-yellow">(-$X)</span> = vault-to-vault overlap deducted from TVL ({fmt(overlap.totalOverlap)} total)
+          </span>
+        )}
       </div>
 
       <div className="card">
@@ -91,7 +109,6 @@ export function VaultsPanel() {
               <th>Cat</th>
               <th>Type</th>
               <th className="text-right">TVL</th>
-              <th>Retired</th>
             </tr>
           </thead>
           <tbody>
@@ -106,8 +123,12 @@ export function VaultsPanel() {
                 <td>{CHAIN_NAMES[v.chainId] || v.chainId}</td>
                 <td className="text-dim">{v.category}</td>
                 <td className="text-dim">{v.vaultType === 1 ? "Alloc" : v.vaultType === 2 ? "Strat" : "-"}</td>
-                <td className="text-right">{fmt(v.tvlUsd)}</td>
-                <td>{v.isRetired ? <span className="text-red">Yes</span> : ""}</td>
+                <td className="text-right">
+                  {fmt(v.tvlUsd)}
+                  {vaultOverlapMap.has(v.address.toLowerCase()) && (
+                    <div className="text-yellow" style={{ fontSize: "0.75rem" }}>(-{fmt(vaultOverlapMap.get(v.address.toLowerCase())!)})</div>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -121,7 +142,10 @@ export function VaultsPanel() {
 
       {overlap && (
         <div className="card">
-          <h2>V3 Overlap Flows ({overlap.count} flows, {fmt(overlap.totalOverlap)} total)</h2>
+          <h2>Vault Overlap Flows ({overlap.count} flows, {fmt(overlap.totalOverlap)} total)</h2>
+          <div className="text-dim" style={{ fontSize: "0.8rem", marginBottom: "0.5rem" }}>
+            Auto-detected: {fmt(overlap.autoOverlap)} | Registry: {fmt(overlap.registryOverlap)}
+          </div>
           <table>
             <thead>
               <tr>
@@ -129,6 +153,7 @@ export function VaultsPanel() {
                 <th>Target Vault</th>
                 <th>Via Strategy</th>
                 <th>Flow</th>
+                <th>Detection</th>
                 <th className="text-right">Overlap</th>
               </tr>
             </thead>
@@ -139,6 +164,7 @@ export function VaultsPanel() {
                   <td>{shortAddr(o.targetVault)}</td>
                   <td className="text-dim">{shortAddr(o.strategyAddress)}</td>
                   <td className="text-dim">{o.sourceCategory} → {o.targetCategory}</td>
+                  <td>{o.detectionMethod === "registry" ? <span className="text-yellow" title={o.label}>{o.label || "registry"}</span> : <span className="text-dim">auto</span>}</td>
                   <td className="text-right text-yellow">{fmt(o.overlapUsd)}</td>
                 </tr>
               ))}

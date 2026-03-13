@@ -37,6 +37,8 @@ export interface OverlapDetail {
   overlapUsd: number;
   sourceCategory: VaultCategory;
   targetCategory: VaultCategory;
+  detectionMethod: "auto" | "registry";
+  label?: string;
 }
 
 export interface DefillamaComparison {

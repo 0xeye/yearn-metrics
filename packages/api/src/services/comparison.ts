@@ -3,7 +3,7 @@
  * Compares our TVL calculations against DefiLlama's reported figures.
  */
 import { db, vaults, vaultSnapshots, defillamaSnapshots } from "@yearn-tvl/db";
-import { eq, desc } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import type { DefillamaComparison } from "@yearn-tvl/shared";
 import { calculateTvl } from "./tvl.js";
 
@@ -37,19 +37,26 @@ const getLatestDefillamaData = async () => {
 
 /** Calculate TVL locked in retired vaults */
 const getRetiredTvl = async (): Promise<number> => {
-  const retiredVaults = await db.select({ id: vaults.id }).from(vaults).where(eq(vaults.isRetired, true));
+  const latestIds = db
+    .select({
+      vaultId: vaultSnapshots.vaultId,
+      maxId: sql<number>`MAX(${vaultSnapshots.id})`.as("max_id"),
+    })
+    .from(vaultSnapshots)
+    .groupBy(vaultSnapshots.vaultId)
+    .as("latest");
 
-  const tvls = await Promise.all(
-    retiredVaults.map(async (v) => {
-      const snap = await db.query.vaultSnapshots.findFirst({
-        where: eq(vaultSnapshots.vaultId, v.id),
-        orderBy: [desc(vaultSnapshots.id)],
-      });
-      return snap?.tvlUsd ?? 0;
-    }),
-  );
+  const rows = await db
+    .select({ tvlUsd: vaultSnapshots.tvlUsd })
+    .from(vaults)
+    .innerJoin(vaultSnapshots, eq(vaultSnapshots.vaultId, vaults.id))
+    .innerJoin(latestIds, and(
+      eq(vaultSnapshots.vaultId, latestIds.vaultId),
+      eq(vaultSnapshots.id, latestIds.maxId),
+    ))
+    .where(eq(vaults.isRetired, true));
 
-  return tvls.reduce((sum, tvl) => sum + tvl, 0);
+  return rows.reduce((sum, r) => sum + (typeof r.tvlUsd === "number" ? r.tvlUsd : 0), 0);
 };
 
 export const getComparison = async (): Promise<DefillamaComparison> => {
@@ -109,7 +116,7 @@ export const getComparison = async (): Promise<DefillamaComparison> => {
     diffPct < 5 && `Total TVL within ${diffPct.toFixed(1)}% of DefiLlama — good alignment.`,
     v2v3DiffPct < 2 && `V2+V3 TVL matches DefiLlama yearn-finance within ${v2v3DiffPct.toFixed(1)}%.`,
     retiredTvl > 1e6 && `$${(retiredTvl / 1e6).toFixed(0)}M in retired vaults excluded from our active total (DefiLlama also excludes these).`,
-    ourTvl.overlapAmount > 1e6 && `$${(ourTvl.overlapAmount / 1e6).toFixed(0)}M V3 allocator→strategy overlap deducted to avoid double-counting.`,
+    ourTvl.overlapAmount > 1e6 && `$${(ourTvl.overlapAmount / 1e6).toFixed(0)}M vault→vault overlap deducted to avoid double-counting.`,
     curationDiff < -5e6 && `Curation gap of $${(Math.abs(curationDiff) / 1e6).toFixed(0)}M — some Morpho vaults not discoverable without archive RPC for factory event scanning.`,
   ].filter((n): n is string => Boolean(n));
 

@@ -164,6 +164,89 @@ tr:hover {
 .badge-low-yield { background: rgba(210, 153, 34, 0.15); color: var(--yellow); }
 .badge-healthy { background: rgba(63, 185, 80, 0.15); color: var(--green); }
 
+.quadrant-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.8rem;
+}
+
+.quadrant-tag {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid;
+  border-radius: 4px;
+  font-weight: 500;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.quadrant-tag .text-dim {
+  font-weight: 400;
+  font-size: 0.75rem;
+}
+
+.quadrant-tag-sm {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.confidence-badge {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.confidence-high { background: rgba(63, 185, 80, 0.15); color: var(--green); }
+.confidence-medium { background: rgba(210, 153, 34, 0.15); color: var(--yellow); }
+.confidence-low { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+
+.filter-select {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+.sortable {
+  cursor: pointer;
+}
+
+.sortable:hover {
+  color: var(--text);
+}
+
+.page-btn {
+  padding: 0.3rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.page-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.page-btn:not(:disabled):hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
 .loading {
   text-align: center;
   padding: 2rem;

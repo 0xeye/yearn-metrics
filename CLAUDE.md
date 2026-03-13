@@ -22,6 +22,9 @@ bun run fetch:depositors # Depositor data from Kong transfers (Ethereum only)
 bun run scripts/fetch-v2-fees.ts    # Read actual V2 fee rates on-chain (most are 10%/0%)
 bun run scripts/reprice-reports.ts  # Reprice reports using DL historical prices
 
+# Overlap detection — find strategies that deposit into other Yearn vaults
+bun run scripts/detect-overlaps.ts  # On-chain scan, outputs candidates for STRATEGY_OVERLAP_REGISTRY
+
 # Audit — interactive TUI with hierarchical TVL breakdown
 bun run audit                              # Interactive TUI (Chain → Category → Vault → Strategy)
 bun run audit -- --min-tvl=1000000         # Filter by min TVL
@@ -89,7 +92,7 @@ GET /health                                  # Health check
 
 GET /api/tvl/                                # TVL summary (totals, by chain, by category)
 GET /api/tvl/vaults?chainId=1&category=v2    # Per-vault list (filterable)
-GET /api/tvl/overlap                         # V3 allocator→strategy overlap details
+GET /api/tvl/overlap                         # Vault→vault overlap details (auto + registry)
 
 GET /api/comparison/                         # Our TVL vs DefiLlama
 
@@ -124,7 +127,7 @@ packages/shared  →  packages/db  →  packages/api  →  packages/dashboard
 **Dependency flow**: shared (types/constants) → db (schema/client) → api (Hono routes/services) and scripts (data fetchers). Dashboard is a standalone React SPA that calls the API via Vite proxy.
 
 ### packages/shared
-Types (`VaultCategory`, `TvlSummary`, `KongVault`, etc.), constants (`CHAIN_IDS`, `CHAIN_NAMES`, `KONG_API_URL`, `V1_VAULTS`, `IGNORED_VAULTS`), curation vault registry (`YEARN_CURATOR_OWNERS`, `TURTLE_CLUB_VAULTS`, factory configs per chain), and pluggable pricing interface (`HistoricalPriceProvider`, `DefiLlamaPriceProvider`).
+Types (`VaultCategory`, `TvlSummary`, `KongVault`, etc.), constants (`CHAIN_IDS`, `CHAIN_NAMES`, `KONG_API_URL`, `V1_VAULTS`, `IGNORED_VAULTS`), curation vault registry (`YEARN_CURATOR_OWNERS`, `TURTLE_CLUB_VAULTS`, factory configs per chain), strategy overlap registry (`STRATEGY_OVERLAP_REGISTRY`), and pluggable pricing interface (`HistoricalPriceProvider`, `DefiLlamaPriceProvider`).
 
 ### packages/db
 SQLite via Drizzle ORM + `bun:sqlite`. DB file lives at `packages/db/yearn-tvl.db` (resolved relative to the package, not CWD). 9 tables: `vaults`, `vaultSnapshots`, `strategies`, `strategyDebts`, `feeConfigs`, `strategyReports`, `defillamaSnapshots`, `depositors`, `tvlOverlap`. Import as `import { db, vaults, ... } from "@yearn-tvl/db"`.
@@ -132,7 +135,7 @@ SQLite via Drizzle ORM + `bun:sqlite`. DB file lives at `packages/db/yearn-tvl.d
 ### packages/api
 Hono REST API on port 3456. Four route groups, each backed by a service:
 
-- `/api/tvl` — TVL summary, per-vault list, overlap details. Service computes latest-snapshot aggregation with V3 allocator→strategy overlap deduction.
+- `/api/tvl` — TVL summary, per-vault list, overlap details. Service computes latest-snapshot aggregation with vault→vault overlap deduction (auto-detected + registry-based).
 - `/api/comparison` — Our TVL vs DefiLlama (yearn-finance + yearn-curating), per-chain and per-category.
 - `/api/fees` — Fee revenue from harvest reports × fee rates. Supports `?since=` timestamp filter and `?interval=weekly|monthly` history.
 - `/api/analysis` — Dead TVL classification (no reports in 365d), retired vault TVL, depositor concentration.
@@ -150,6 +153,7 @@ Each script fetches from an external source and upserts into the DB:
 - `fetch-depositors.ts` — Kong `transfers(chainId, address)` → depositors (Ethereum only, 100/vault limit)
 - `fetch-v2-fees.ts` — Reads actual `managementFee()` and `performanceFee()` from V2 vault contracts on-chain
 - `reprice-reports.ts` — Reprices reports with `HistoricalPriceProvider` (default: DefiLlama historical prices, snapshot fallback)
+- `detect-overlaps.ts` — On-chain scan for strategies holding shares of other Yearn vaults; outputs candidates for `STRATEGY_OVERLAP_REGISTRY` in `packages/shared/src/strategy-overlaps.ts`
 - `audit.ts` — Interactive TUI: Chain → Category (Allocation/Strategies/Curators) → Vault → Strategy
 
 ## Key Domain Concepts
@@ -158,7 +162,7 @@ Each script fetches from an external source and upserts into the DB:
 
 **Vault types (V3 only)**: `1` = allocator (deposits into strategies), `2` = strategy (receives allocations). The audit TUI splits V3 into "Allocators" and "Strategies" sub-categories. Showing only one avoids double-counting.
 
-**Double-counting**: V3 allocators deploy capital to strategies that may be other vaults. The overlap engine in `services/tvl.ts` detects when a strategy address matches a known vault and deducts the debt amount from the total.
+**Double-counting**: Vaults can deploy capital to strategies that are (or deposit into) other vaults. The overlap engine in `services/tvl.ts` uses two methods: (1) auto-detection — checks if any strategy address matches a known vault address across all vault types, (2) registry-based — `STRATEGY_OVERLAP_REGISTRY` in `packages/shared/src/strategy-overlaps.ts` lists intermediary depositor contracts whose address ≠ target vault. Run `bun run scripts/detect-overlaps.ts` to discover new candidates.
 
 **Fee calculation**: Performance fee = `gainUsd × (performanceFee / 10000)`. Management fee = `TVL × (mgmtFee / 10000) × durationYears`. Fees stored in basis points (1000 = 10%).
 

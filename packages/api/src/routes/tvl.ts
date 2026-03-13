@@ -22,7 +22,9 @@ tvl.get("/vaults", async (c) => {
 tvl.get("/overlap", async (c) => {
   const overlaps = await getOverlapDetails();
   const total = overlaps.reduce((sum, o) => sum + o.overlapUsd, 0);
-  return c.json({ totalOverlap: total, count: overlaps.length, overlaps });
+  const autoOverlap = overlaps.filter((o) => o.detectionMethod === "auto").reduce((sum, o) => sum + o.overlapUsd, 0);
+  const registryOverlap = overlaps.filter((o) => o.detectionMethod === "registry").reduce((sum, o) => sum + o.overlapUsd, 0);
+  return c.json({ totalOverlap: total, autoOverlap, registryOverlap, count: overlaps.length, overlaps });
 });
 
 export { tvl };

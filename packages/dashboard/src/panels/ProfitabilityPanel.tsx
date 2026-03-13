@@ -169,11 +169,6 @@ export function ProfitabilityPanel() {
 
   const sortArrow = (key: SortKey) => sortKey === key ? (sortDir === "desc" ? " ▼" : " ▲") : "";
 
-  // Data quality
-  const dq = data.dataQuality;
-  const pricingCoverage = dq.totalReports > 0 ? (dq.reportsWithPricingSource / dq.totalReports * 100) : 0;
-  const highPlusMedium = dq.highConfidenceCount + dq.mediumConfidenceCount;
-
   return (
     <>
       {/* Top metrics */}
@@ -198,15 +193,6 @@ export function ProfitabilityPanel() {
           <div className="value text-green">{fmt(data.totalAnnualizedFees)}</div>
           <div className="sub">On {fmt(data.totalTvl)} TVL (V1+V2+V3 alloc.)</div>
         </div>
-        <div className="metric">
-          <div className="label">Pricing Confidence</div>
-          <div className="value">{highPlusMedium}/{data.vaultCount}</div>
-          <div className="sub">
-            {pricingCoverage > 0
-              ? `${pricingCoverage.toFixed(0)}% explicitly priced`
-              : "Kong API prices (pre-repricing)"}
-          </div>
-        </div>
       </div>
 
       {/* Quadrant scatter plot */}
@@ -217,7 +203,7 @@ export function ProfitabilityPanel() {
             const count = data.quadrants[key as Quadrant]?.length || 0;
             return (
               <span key={key} className="quadrant-tag" style={{ borderColor: color, color }}>
-                {label} ({count}) <span className="text-dim" style={{ fontSize: "0.7rem" }}>— {desc}</span>
+                {label} ({count}) <span className="text-dim">— {desc}</span>
               </span>
             );
           })}

@@ -118,11 +118,6 @@ export function AnalysisPanel() {
           <div className="value">{totalAnalyzed > 0 ? ((s.healthyTvl / totalAnalyzed) * 100).toFixed(1) : 0}%</div>
           <div className="sub">of analyzed TVL</div>
         </div>
-        <div className="metric">
-          <div className="label">Depositor Coverage</div>
-          <div className="value">{sticky.count}</div>
-          <div className="sub">vaults with data (Ethereum)</div>
-        </div>
       </div>
 
       <div className="card">

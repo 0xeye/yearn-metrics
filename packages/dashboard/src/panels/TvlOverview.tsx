@@ -65,7 +65,7 @@ export function TvlOverview() {
         <div className="metric">
           <div className="label">Overlap Deducted</div>
           <div className="value text-yellow">{fmt(data.overlapAmount)}</div>
-          <div className="sub">V3 allocator double-count</div>
+          <div className="sub">Vault overlap deducted</div>
         </div>
         <div className="metric">
           <div className="label">Retired Vaults</div>
