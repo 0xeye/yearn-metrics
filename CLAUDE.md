@@ -246,6 +246,77 @@ Each script fetches from an external source and upserts into the DB:
 
 **Chains supported**: Ethereum (1), Optimism (10), Polygon (137), Fantom (250), Base (8453), Arbitrum (42161), Gnosis (100), Katana (747474), Hyperliquid (999).
 
+## Data Methodology
+
+### Data sources
+
+| Source | What it provides | Scripts |
+|--------|-----------------|---------|
+| Kong GraphQL API (`kong.yearn.fi/api/gql`) | V2/V3 vaults, TVL (`tvl.close`), strategies, debts, fee configs, harvest reports | `fetch-kong.ts`, `fetch-reports.ts` |
+| DefiLlama Protocol API (`api.llama.fi/protocol/{slug}`) | Reference TVL for `yearn-finance` and `yearn-curating` protocols, per-chain breakdown | `fetch-defillama.ts` |
+| DefiLlama Pricing API (`coins.llama.fi/prices`) | Current token prices (fallback for Kong zero-TVL vaults), historical prices for report repricing | `fetch-kong.ts`, `fetch-v1-vaults.ts`, `reprice-reports.ts` |
+| Morpho Blue API (`blue-api.morpho.org/graphql`) | Curation vault discovery by owner/creator/curator address, totalAssetsUsd | `fetch-curation.ts` |
+| On-chain RPC reads | V1 vault state (`getPricePerFullShare`, `totalSupply`), V2 fee rates, Turtle Club vault balances | `fetch-v1-vaults.ts`, `fetch-v2-fees.ts`, `fetch-curation.ts` |
+| Velodrome/Aerodrome Sugar Oracle | LP token pricing on Optimism/Base when Kong returns zero | `fetch-kong.ts` (via `velo-oracle.ts`) |
+
+### How TVL is calculated
+
+1. **Snapshot collection**: Each fetcher stores a timestamped `vaultSnapshots` row with `tvlUsd`. Kong provides USD TVL directly (`tvl.close`); V1 and curation vaults are priced via on-chain reads + DefiLlama token prices.
+
+2. **Aggregation**: The TVL service takes the latest snapshot per vault, groups by category (v1/v2/v3/curation) and chain, and sums.
+
+3. **Overlap deduction**: Capital can flow vault → strategy → another vault, creating double-counts. Two detection methods:
+   - *Auto*: If a strategy address equals a known vault address on the same chain, the strategy's `currentDebtUsd` is flagged as overlap.
+   - *Registry*: `STRATEGY_OVERLAP_REGISTRY` lists intermediary contracts where strategy address ≠ target vault (discovered via `detect-overlaps.ts`).
+
+4. **Final formula**: `totalTvl = v1Tvl + v2Tvl + v3Tvl + curationTvl - overlapAmount`
+
+5. **Exclusions**: Retired vaults excluded from active totals. 9 vaults in `IGNORED_VAULTS` excluded entirely (bad data or DL blacklist).
+
+### How fees are calculated
+
+**Performance fees**: For each harvest report, `gainUsd × (performanceFee / 10000)`. Only positive gains count; losses are ignored.
+
+**Management fees**: `tvlUsd × (managementFee / 10000) × durationYears`, where duration = time between first and last harvest report. Uses latest TVL snapshot (not time-weighted).
+
+**Fee rates**: Stored in basis points (1000 = 10%). V2 defaults to 1000 perf / 0 mgmt if Kong has no data. Corrected by `fetch-v2-fees.ts` which reads actual on-chain rates.
+
+### How reports are priced
+
+Harvest reports record raw token `gain` amounts. USD conversion (`gainUsd`) follows a priority chain:
+
+1. Kong's `gainUsd` — used if non-zero
+2. DefiLlama historical price at harvest timestamp (`reprice-reports.ts`) — batch process using `coins.llama.fi/prices/historical/{timestamp}/{chain}:{token}`
+3. Vault snapshot price (`tvlUsd / totalAssets`) — fallback if no external price available
+4. Cap at $500K per report — protects against corrupted Kong data (e.g. OHM-FRAXBP returning $4T)
+
+### How DL comparison works
+
+Our TVL is compared against DefiLlama's two protocol slugs:
+- `yearn-finance` ↔ our V1 + V2 + V3 (minus overlap)
+- `yearn-curating` ↔ our Curation
+
+Per-chain and per-category deltas are computed. Automated notes flag alignment (<5% diff), large retired TVL (>$1M), overlap deductions, and curation gaps (missing Morpho vaults).
+
+### Pricing fallback chain
+
+When Kong returns `tvl.close = 0` but `totalAssets > 0`:
+1. DefiLlama current price → `totalAssets / 10^decimals × price`
+2. Velodrome/Aerodrome Sugar Oracle (Optimism/Base LP tokens only)
+3. Previous snapshot TVL (if vault exists in DB)
+4. Stablecoin assumption ($1/token for USDC/USDT/DAI/FRAX/LUSD) — curation vaults only
+
+### Known limitations
+
+- **Point-in-time only**: All TVL numbers are latest snapshots, not historical time-series.
+- **Overlap deduction is conservative**: Only single-hop deduction (A→B), no cascade (A→B→C). Registry requires manual curation via `detect-overlaps.ts`.
+- **Management fee is approximate**: Uses single latest TVL snapshot, not time-weighted average over the reporting period.
+- **Fee rates are latest-only**: Historical fee rate changes are not tracked; if a vault changed from 20% to 10% perf fee, all reports use the current 10%.
+- **LP token repricing is imprecise**: Snapshot-based fallback uses current reserves, not historical composition.
+- **Curation discovery is incomplete**: Morpho API queries by known owner/creator/curator addresses. Vaults from unknown curators or new factories won't appear until registry is updated.
+- **V1 vaults are a fixed list**: 28 hard-coded addresses; new V1 vaults (unlikely) require manual addition.
+- **DefiLlama comparison is approximate**: DL may use different double-count rules, include/exclude different vaults, or lag on updates.
+
 ## Environment
 
 `.env` at project root. Never committed.
