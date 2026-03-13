@@ -21,7 +21,7 @@ const chains: Record<number, { chain: any; rpcEnv: string }> = {
   42161: { chain: arbitrum, rpcEnv: "RPC_URI_FOR_42161" },
 };
 
-export async function fetchV2Fees() {
+export const fetchV2Fees = async () => {
   const v2Vaults = await db.query.vaults.findMany({
     where: and(eq(vaults.category, "v2"), eq(vaults.isRetired, false)),
   });
@@ -33,11 +33,11 @@ export async function fetchV2Fees() {
   const rateDist: Record<string, number> = {};
 
   // Group by chain
-  const byChain = new Map<number, typeof v2Vaults>();
-  for (const v of v2Vaults) {
-    if (!byChain.has(v.chainId)) byChain.set(v.chainId, []);
-    byChain.get(v.chainId)!.push(v);
-  }
+  const byChain = v2Vaults.reduce((acc, v) => {
+    const arr = acc.get(v.chainId) ?? [];
+    arr.push(v);
+    return acc.set(v.chainId, arr);
+  }, new Map<number, typeof v2Vaults>());
 
   for (const [chainId, chainVaults] of byChain) {
     const config = chains[chainId];
@@ -104,7 +104,7 @@ export async function fetchV2Fees() {
   }
 
   return { updated, errors };
-}
+};
 
 if (import.meta.main) {
   const result = await fetchV2Fees();

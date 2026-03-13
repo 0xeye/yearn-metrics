@@ -1,6 +1,4 @@
 export type VaultCategory = "v1" | "v2" | "v3" | "curation";
-export type VaultSource = "kong" | "onchain";
-export type VaultType = 1 | 2; // 1=allocator, 2=strategy
 
 export interface TvlSummary {
   totalTvl: number;

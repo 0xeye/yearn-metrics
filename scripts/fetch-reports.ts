@@ -41,7 +41,7 @@ const REPORTS_QUERY = `
   }
 `;
 
-async function fetchVaultReports(chainId: number, address: string): Promise<KongVaultReport[]> {
+const fetchVaultReports = async (chainId: number, address: string): Promise<KongVaultReport[]> => {
   const res = await fetch(KONG_API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -54,9 +54,9 @@ async function fetchVaultReports(chainId: number, address: string): Promise<Kong
   if (!res.ok) throw new Error(`Kong API error: ${res.status}`);
   const json = (await res.json()) as { data: { vaultReports: KongVaultReport[] } };
   return json.data?.vaultReports || [];
-}
+};
 
-async function getActiveVaults() {
+const getActiveVaults = async () => {
   return db
     .select({
       id: vaults.id,
@@ -68,10 +68,10 @@ async function getActiveVaults() {
     })
     .from(vaults)
     .where(eq(vaults.isRetired, false));
-}
+};
 
 /** Compute token price in USD from latest vault snapshot: TVL / (totalAssets / 10^decimals) */
-async function getTokenPrice(vaultId: number, decimals: number): Promise<number> {
+const getTokenPrice = async (vaultId: number, decimals: number): Promise<number> => {
   const [snap] = await db
     .select({ tvlUsd: vaultSnapshots.tvlUsd, totalAssets: vaultSnapshots.totalAssets })
     .from(vaultSnapshots)
@@ -83,10 +83,10 @@ async function getTokenPrice(vaultId: number, decimals: number): Promise<number>
   const totalAssets = Number(snap.totalAssets);
   if (totalAssets === 0) return 0;
   return snap.tvlUsd / (totalAssets / 10 ** decimals);
-}
+};
 
 /** Convert raw token gain to USD using vault's token price */
-function rawGainToUsd(rawGain: string | null, decimals: number, tokenPrice: number): number {
+const rawGainToUsd = (rawGain: string | null, decimals: number, tokenPrice: number): number => {
   if (!rawGain || rawGain === "0") return 0;
   try {
     const gain = Number(BigInt(rawGain)) / 10 ** decimals;
@@ -94,9 +94,9 @@ function rawGainToUsd(rawGain: string | null, decimals: number, tokenPrice: numb
   } catch {
     return 0;
   }
-}
+};
 
-export async function fetchAndStoreReports() {
+export const fetchAndStoreReports = async () => {
   console.log("Fetching vault harvest reports from Kong...");
 
   const activeVaults = await getActiveVaults();
@@ -194,7 +194,7 @@ export async function fetchAndStoreReports() {
   }
 
   return { totalReports, totalGainUsd, repricedCount, repricedUsd };
-}
+};
 
 if (import.meta.main) {
   const result = await fetchAndStoreReports();

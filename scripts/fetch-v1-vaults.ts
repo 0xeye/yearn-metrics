@@ -24,7 +24,7 @@ const ERC20_ABI = parseAbi([
 
 const DL_PRICE_URL = "https://coins.llama.fi/prices/current";
 
-async function fetchTokenPrices(addresses: string[]): Promise<Map<string, number>> {
+const fetchTokenPrices = async (addresses: string[]): Promise<Map<string, number>> => {
   const coins = addresses.map((a) => `ethereum:${a}`).join(",");
   try {
     const res = await fetch(`${DL_PRICE_URL}/${coins}`);
@@ -32,18 +32,17 @@ async function fetchTokenPrices(addresses: string[]): Promise<Map<string, number
     const data = (await res.json()) as {
       coins: Record<string, { price: number }>;
     };
-    const prices = new Map<string, number>();
-    for (const [key, info] of Object.entries(data.coins)) {
-      const addr = key.split(":")[1]?.toLowerCase();
-      if (addr && info.price > 0) prices.set(addr, info.price);
-    }
-    return prices;
+    return new Map(
+      Object.entries(data.coins)
+        .map(([key, info]) => [key.split(":")[1]?.toLowerCase(), info.price] as const)
+        .filter(([addr, price]) => addr && price > 0) as [string, number][],
+    );
   } catch {
     return new Map();
   }
-}
+};
 
-export async function fetchV1Vaults() {
+export const fetchV1Vaults = async () => {
   const rpcUrl = process.env.RPC_URI_FOR_1 || process.env.ETH_RPC_URL;
   if (!rpcUrl) {
     console.error("No Ethereum RPC URL configured (RPC_URI_FOR_1 or ETH_RPC_URL)");
@@ -180,7 +179,7 @@ export async function fetchV1Vaults() {
 
   console.log(`\nStored ${stored} V1 vaults, ${errors} errors`);
   return { stored, errors };
-}
+};
 
 if (import.meta.main) {
   const result = await fetchV1Vaults();

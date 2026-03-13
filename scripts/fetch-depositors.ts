@@ -37,7 +37,7 @@ const TRANSFERS_QUERY = `
   }
 `;
 
-async function fetchTransfers(chainId: number, vaultAddress: string): Promise<KongTransfer[]> {
+const fetchTransfers = async (chainId: number, vaultAddress: string): Promise<KongTransfer[]> => {
   const res = await fetch(KONG_API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -59,9 +59,9 @@ async function fetchTransfers(chainId: number, vaultAddress: string): Promise<Ko
   }
 
   return json.data?.transfers ?? [];
-}
+};
 
-function buildDepositorMap(transfers: KongTransfer[]): Map<string, DepositorEntry> {
+const buildDepositorMap = (transfers: KongTransfer[]): Map<string, DepositorEntry> => {
   const map = new Map<string, DepositorEntry>();
 
   for (const t of transfers) {
@@ -96,22 +96,22 @@ function buildDepositorMap(transfers: KongTransfer[]): Map<string, DepositorEntr
   }
 
   return map;
-}
+};
 
-function blockTimeToIso(blockTime: string): string {
+const blockTimeToIso = (blockTime: string): string => {
   const ts = Number(blockTime);
   if (!Number.isNaN(ts) && ts > 0) {
     return new Date(ts * 1000).toISOString();
   }
   // Already ISO or some other format — return as-is
   return blockTime;
-}
+};
 
-async function upsertDepositors(
+const upsertDepositors = async (
   vaultId: number,
   chainId: number,
   depositorMap: Map<string, DepositorEntry>
-): Promise<number> {
+): Promise<number> => {
   let count = 0;
 
   for (const entry of depositorMap.values()) {
@@ -150,9 +150,9 @@ async function upsertDepositors(
   }
 
   return count;
-}
+};
 
-export async function fetchAndStoreDepositors() {
+export const fetchAndStoreDepositors = async () => {
   // Get active (non-retired) vaults, focusing on chain 1 where transfers work
   const activeVaults = await db.query.vaults.findMany({
     where: and(
@@ -205,7 +205,7 @@ export async function fetchAndStoreDepositors() {
   }
 
   return { totalDepositors, vaultsWithData, totalVaults: activeVaults.length };
-}
+};
 
 // Run directly
 if (import.meta.main) {

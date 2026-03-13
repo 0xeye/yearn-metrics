@@ -6,7 +6,7 @@ import { fetchAndStoreDefillamaData } from "./fetch-defillama.js";
 import { fetchAndStoreCurationData } from "./fetch-curation.js";
 import { fetchV1Vaults } from "./fetch-v1-vaults.js";
 
-async function seed() {
+const seed = async () => {
   console.log("=== Yearn TVL Seed ===\n");
   const start = Date.now();
 
@@ -28,7 +28,7 @@ async function seed() {
   console.log(`  DefiLlama: ${defillama.stored} snapshots`);
   console.log(`  Curation: ${curation.totalVaults} vaults`);
   console.log(`  V1: ${v1.stored} vaults`);
-}
+};
 
 seed().catch((err) => {
   console.error("Seed failed:", err);

@@ -23,7 +23,7 @@ const MAX_GAIN_PER_REPORT = 500_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function getSnapshotTokenPrice(vaultId: number, decimals: number): Promise<number> {
+const getSnapshotTokenPrice = async (vaultId: number, decimals: number): Promise<number> => {
   const [snap] = await db
     .select({ tvlUsd: vaultSnapshots.tvlUsd, totalAssets: vaultSnapshots.totalAssets })
     .from(vaultSnapshots)
@@ -35,17 +35,17 @@ async function getSnapshotTokenPrice(vaultId: number, decimals: number): Promise
   const totalAssets = Number(snap.totalAssets);
   if (totalAssets === 0) return 0;
   return snap.tvlUsd / (totalAssets / 10 ** decimals);
-}
+};
 
-function rawToUsd(rawGain: string, decimals: number, price: number): number {
+const rawToUsd = (rawGain: string, decimals: number, price: number): number => {
   try {
     return (Number(BigInt(rawGain)) / 10 ** decimals) * price;
   } catch {
     return 0;
   }
-}
+};
 
-export async function repriceReports(provider: HistoricalPriceProvider) {
+export const repriceReports = async (provider: HistoricalPriceProvider) => {
   const reports = await db
     .select({
       id: strategyReports.id,
@@ -72,20 +72,19 @@ export async function repriceReports(provider: HistoricalPriceProvider) {
     .from(vaults)
     .where(eq(vaults.isRetired, false));
 
-  for (const v of allVaults) {
-    if (v.assetAddress) {
-      vaultInfoCache.set(v.id, { assetAddress: v.assetAddress, assetDecimals: v.assetDecimals || 18, chainId: v.chainId });
-    }
-  }
+  allVaults
+    .filter((v) => v.assetAddress)
+    .forEach((v) => vaultInfoCache.set(v.id, { assetAddress: v.assetAddress!, assetDecimals: v.assetDecimals || 18, chainId: v.chainId }));
 
   // Group reports by day (noon timestamp) for batching
-  const byDay = new Map<number, typeof reports>();
-  for (const r of reports) {
-    if (!r.blockTime) continue;
-    const dayTs = Math.floor(r.blockTime / 86400) * 86400 + 43200;
-    if (!byDay.has(dayTs)) byDay.set(dayTs, []);
-    byDay.get(dayTs)!.push(r);
-  }
+  const byDay = reports
+    .filter((r) => r.blockTime)
+    .reduce((acc, r) => {
+      const dayTs = Math.floor(r.blockTime! / 86400) * 86400 + 43200;
+      const arr = acc.get(dayTs) ?? [];
+      arr.push(r);
+      return acc.set(dayTs, arr);
+    }, new Map<number, typeof reports>());
 
   const days = [...byDay.keys()].sort();
   console.log(`Grouped into ${days.length} unique days\n`);
@@ -103,12 +102,12 @@ export async function repriceReports(provider: HistoricalPriceProvider) {
     const dayReports = byDay.get(dayTs)!;
 
     // Collect unique assets needed for this day
-    const assetsNeeded = new Map<string, { chainId: number; address: string }>();
-    for (const r of dayReports) {
-      const info = vaultInfoCache.get(r.vaultId);
-      if (!info) continue;
-      assetsNeeded.set(info.assetAddress.toLowerCase(), { chainId: info.chainId, address: info.assetAddress });
-    }
+    const assetsNeeded = new Map(
+      dayReports
+        .map((r) => vaultInfoCache.get(r.vaultId))
+        .filter(Boolean)
+        .map((info) => [info!.assetAddress.toLowerCase(), { chainId: info!.chainId, address: info!.assetAddress }] as const),
+    );
 
     // Fetch historical prices via provider
     const prices = assetsNeeded.size > 0
@@ -159,7 +158,7 @@ export async function repriceReports(provider: HistoricalPriceProvider) {
   console.log(`  Skipped (no vault info): ${skipped}`);
 
   return { updated, dlPriced, snapshotPriced, failed };
-}
+};
 
 if (import.meta.main) {
   // Swap this to use your own pricing service when ready

@@ -24,7 +24,7 @@ interface MorphoVault {
 
 // --- Morpho API fetch ---
 
-async function fetchMorphoVaults(): Promise<MorphoVault[]> {
+const fetchMorphoVaults = async (): Promise<MorphoVault[]> => {
   const owners = JSON.stringify([...YEARN_CURATOR_OWNERS]);
   const fields = `
     address
@@ -65,17 +65,9 @@ async function fetchMorphoVaults(): Promise<MorphoVault[]> {
   };
 
   // Merge and deduplicate
-  const seen = new Set<string>();
-  const merged: MorphoVault[] = [];
-  for (const v of [...json.data.byOwner.items, ...json.data.byCreator.items, ...json.data.byCurator.items]) {
-    const key = `${v.chain.id}:${v.address.toLowerCase()}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      merged.push(v);
-    }
-  }
-  return merged;
-}
+  const allItems = [...json.data.byOwner.items, ...json.data.byCreator.items, ...json.data.byCurator.items];
+  return [...new Map(allItems.map((v) => [`${v.chain.id}:${v.address.toLowerCase()}`, v])).values()];
+};
 
 // --- Turtle Club on-chain reads (Ethereum only) ---
 
@@ -90,7 +82,7 @@ const ERC20_ABI = [
   { name: "decimals", type: "function", inputs: [], outputs: [{ type: "uint8" }], stateMutability: "view" },
 ] as const;
 
-async function fetchTurtleClubVaults(): Promise<MorphoVault[]> {
+const fetchTurtleClubVaults = async (): Promise<MorphoVault[]> => {
   const rpcUrl = process.env.RPC_URI_FOR_1 || process.env.ETH_RPC_URL;
   const client = createPublicClient({ chain: mainnet, transport: http(rpcUrl) });
 
@@ -125,11 +117,11 @@ async function fetchTurtleClubVaults(): Promise<MorphoVault[]> {
   }
 
   return results;
-}
+};
 
 // --- Persist ---
 
-async function persistCurationVault(mv: MorphoVault) {
+const persistCurationVault = async (mv: MorphoVault) => {
   const now = new Date().toISOString();
   const address = getAddress(mv.address);
   const chainId = mv.chain.id;
@@ -138,56 +130,52 @@ async function persistCurationVault(mv: MorphoVault) {
     where: and(eq(vaults.address, address), eq(vaults.chainId, chainId)),
   });
 
-  let vaultId: number;
-  if (existing) {
-    await db
-      .update(vaults)
-      .set({
-        name: mv.name,
-        category: "curation",
-        source: "onchain",
-        assetAddress: mv.asset.address,
-        assetSymbol: mv.asset.symbol,
-        assetDecimals: mv.asset.decimals,
-        updatedAt: now,
-      })
-      .where(eq(vaults.id, existing.id));
-    vaultId = existing.id;
-  } else {
-    const [inserted] = await db
-      .insert(vaults)
-      .values({
-        address,
-        chainId,
-        name: mv.name,
-        v3: false,
-        yearn: true,
-        category: "curation",
-        source: "onchain",
-        assetAddress: mv.asset.address,
-        assetSymbol: mv.asset.symbol,
-        assetDecimals: mv.asset.decimals,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: vaults.id });
-    vaultId = inserted.id;
-  }
+  const vaultId = existing
+    ? (await db
+        .update(vaults)
+        .set({
+          name: mv.name,
+          category: "curation",
+          source: "onchain",
+          assetAddress: mv.asset.address,
+          assetSymbol: mv.asset.symbol,
+          assetDecimals: mv.asset.decimals,
+          updatedAt: now,
+        })
+        .where(eq(vaults.id, existing.id))
+        .then(() => existing.id))
+    : (await db
+        .insert(vaults)
+        .values({
+          address,
+          chainId,
+          name: mv.name,
+          v3: false,
+          yearn: true,
+          category: "curation",
+          source: "onchain",
+          assetAddress: mv.asset.address,
+          assetSymbol: mv.asset.symbol,
+          assetDecimals: mv.asset.decimals,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: vaults.id }))[0].id;
 
   // Use Morpho API USD price if available, else fall back to existing snapshot or stablecoin approximation
-  let tvlUsd = mv.state.totalAssetsUsd;
-  if (!tvlUsd) {
+  const tvlUsd = mv.state.totalAssetsUsd ?? await (async () => {
     const lastSnapshot = await db.query.vaultSnapshots.findFirst({
       where: eq(vaultSnapshots.vaultId, vaultId),
       orderBy: [desc(vaultSnapshots.id)],
     });
-    tvlUsd = lastSnapshot?.tvlUsd ?? null;
+    if (lastSnapshot?.tvlUsd) return lastSnapshot.tvlUsd;
 
     const stablecoins = ["USDC", "USDT", "DAI", "FRAX", "LUSD"];
-    if (!tvlUsd && stablecoins.includes(mv.asset.symbol)) {
-      tvlUsd = Number(formatUnits(BigInt(mv.state.totalAssets), mv.asset.decimals));
+    if (stablecoins.includes(mv.asset.symbol)) {
+      return Number(formatUnits(BigInt(mv.state.totalAssets), mv.asset.decimals));
     }
-  }
+    return null;
+  })();
 
   await db.insert(vaultSnapshots).values({
     vaultId,
@@ -197,11 +185,11 @@ async function persistCurationVault(mv: MorphoVault) {
   });
 
   return { vaultId, tvlUsd: tvlUsd ?? 0 };
-}
+};
 
 // --- Main ---
 
-export async function fetchAndStoreCurationData() {
+export const fetchAndStoreCurationData = async () => {
   console.log("Fetching curation vaults...");
 
   // 1. Morpho API — primary source for all Morpho vaults
@@ -215,15 +203,8 @@ export async function fetchAndStoreCurationData() {
   console.log(`  [Turtle Club] Found ${turtleVaults.length} vaults`);
 
   // Merge, deduplicate by address+chainId
-  const seen = new Set<string>();
-  const allVaults: MorphoVault[] = [];
-  for (const v of [...morphoVaults, ...turtleVaults]) {
-    const key = `${v.chain.id}:${v.address.toLowerCase()}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      allVaults.push(v);
-    }
-  }
+  const allItems = [...morphoVaults, ...turtleVaults];
+  const allVaults = [...new Map(allItems.map((v) => [`${v.chain.id}:${v.address.toLowerCase()}`, v])).values()];
 
   // Persist
   let totalTvl = 0;
@@ -245,7 +226,7 @@ export async function fetchAndStoreCurationData() {
   }
 
   return { totalVaults: allVaults.length, totalTvl };
-}
+};
 
 if (import.meta.main) {
   const result = await fetchAndStoreCurationData();

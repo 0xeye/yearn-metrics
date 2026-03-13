@@ -63,8 +63,14 @@ interface DepositorEntry {
   percentOfVault: number;
 }
 
+const classify = (hasRecentReport: boolean, gainToTvlRatio: number): Classification => {
+  if (!hasRecentReport) return "dead";
+  if (gainToTvlRatio < 0.001) return "low-yield";
+  return "healthy";
+};
+
 /** Analyze dead and underperforming vaults based on recent strategy reports */
-export async function getDeadTvlAnalysis(): Promise<DeadTvlResult> {
+export const getDeadTvlAnalysis = async (): Promise<DeadTvlResult> => {
   const now = Math.floor(Date.now() / 1000);
   const cutoff = now - 365 * 24 * 3600;
 
@@ -101,13 +107,8 @@ export async function getDeadTvlAnalysis(): Promise<DeadTvlResult> {
   for (const vault of activeVaults) {
     const tvlUsd = vault.tvlUsd ?? 0;
     if (tvlUsd <= 10_000) continue;
-
-    // Skip vaults that inherently don't have harvest reports:
-    // - Curation vaults (Morpho/Turtle Club) are not indexed by Kong
-    // - V3 strategies (vaultType=2) receive allocations; reports live on the parent allocator
     if (vault.category === "curation" || vault.vaultType === 2) continue;
 
-    // Aggregate strategy reports in last 365 days
     const [reportAgg] = await db
       .select({
         totalGain: sql<number>`COALESCE(SUM(${strategyReports.gainUsd}), 0)`,
@@ -122,10 +123,8 @@ export async function getDeadTvlAnalysis(): Promise<DeadTvlResult> {
 
     const gains365d = reportAgg?.totalGain || 0;
     const reportCount365d = reportAgg?.count || 0;
-    const hasRecentReport = reportCount365d > 0;
     const gainToTvlRatio = tvlUsd > 0 ? gains365d / tvlUsd : 0;
 
-    // Get performance fee
     const [feeRow] = await db
       .select({ performanceFee: feeConfigs.performanceFee })
       .from(feeConfigs)
@@ -133,22 +132,7 @@ export async function getDeadTvlAnalysis(): Promise<DeadTvlResult> {
       .orderBy(desc(feeConfigs.id))
       .limit(1);
 
-    const performanceFee = feeRow?.performanceFee || 0;
-    const feeRevenue365d = gains365d * (performanceFee / 10000);
-
-    // Classify
-    let classification: Classification;
-    if (!hasRecentReport) {
-      classification = "dead";
-    } else if (gainToTvlRatio < 0.001) {
-      classification = "low-yield";
-    } else {
-      classification = "healthy";
-    }
-
-    const lastReportDate = reportAgg?.lastReport
-      ? new Date(reportAgg.lastReport * 1000).toISOString()
-      : null;
+    const classification = classify(reportCount365d > 0, gainToTvlRatio);
 
     result.push({
       address: vault.address,
@@ -158,56 +142,33 @@ export async function getDeadTvlAnalysis(): Promise<DeadTvlResult> {
       tvlUsd,
       gains365d,
       gainToTvlRatio,
-      feeRevenue365d,
+      feeRevenue365d: gains365d * ((feeRow?.performanceFee || 0) / 10000),
       classification,
-      lastReportDate,
+      lastReportDate: reportAgg?.lastReport
+        ? new Date(reportAgg.lastReport * 1000).toISOString()
+        : null,
       reportCount365d,
     });
   }
 
-  // Sort by TVL desc
   result.sort((a, b) => b.tvlUsd - a.tvlUsd);
 
-  // Build summary
-  let totalDeadTvl = 0;
-  let totalLowYieldTvl = 0;
-  let healthyTvl = 0;
-  let deadVaultCount = 0;
-  let lowYieldCount = 0;
-  let healthyCount = 0;
-
-  for (const v of result) {
-    switch (v.classification) {
-      case "dead":
-        totalDeadTvl += v.tvlUsd;
-        deadVaultCount++;
-        break;
-      case "low-yield":
-        totalLowYieldTvl += v.tvlUsd;
-        lowYieldCount++;
-        break;
-      case "healthy":
-        healthyTvl += v.tvlUsd;
-        healthyCount++;
-        break;
-    }
-  }
-
-  return {
-    summary: {
-      totalDeadTvl,
-      totalLowYieldTvl,
-      healthyTvl,
-      deadVaultCount,
-      lowYieldCount,
-      healthyCount,
+  const summary = result.reduce(
+    (acc, v) => {
+      switch (v.classification) {
+        case "dead": return { ...acc, totalDeadTvl: acc.totalDeadTvl + v.tvlUsd, deadVaultCount: acc.deadVaultCount + 1 };
+        case "low-yield": return { ...acc, totalLowYieldTvl: acc.totalLowYieldTvl + v.tvlUsd, lowYieldCount: acc.lowYieldCount + 1 };
+        case "healthy": return { ...acc, healthyTvl: acc.healthyTvl + v.tvlUsd, healthyCount: acc.healthyCount + 1 };
+      }
     },
-    vaults: result,
-  };
-}
+    { totalDeadTvl: 0, totalLowYieldTvl: 0, healthyTvl: 0, deadVaultCount: 0, lowYieldCount: 0, healthyCount: 0 },
+  );
+
+  return { summary, vaults: result };
+};
 
 /** Find retired vaults that still hold TVL > 0 */
-export async function getRetiredTvlAnalysis(): Promise<RetiredVault[]> {
+export const getRetiredTvlAnalysis = async (): Promise<RetiredVault[]> => {
   const latestIds = db
     .select({
       vaultId: vaultSnapshots.vaultId,
@@ -243,11 +204,10 @@ export async function getRetiredTvlAnalysis(): Promise<RetiredVault[]> {
       tvlUsd: r.tvlUsd ?? 0,
     }))
     .sort((a, b) => b.tvlUsd - a.tvlUsd);
-}
+};
 
 /** Analyze depositor stickiness / concentration per vault */
-export async function getStickyTvlAnalysis(): Promise<StickyTvlVault[]> {
-  // Get depositor stats grouped by vault
+export const getStickyTvlAnalysis = async (): Promise<StickyTvlVault[]> => {
   const vaultDepositorStats = await db
     .select({
       vaultId: depositors.vaultId,
@@ -258,13 +218,8 @@ export async function getStickyTvlAnalysis(): Promise<StickyTvlVault[]> {
     .from(depositors)
     .groupBy(depositors.vaultId);
 
-  // Build a lookup
-  const statsMap = new Map<number, typeof vaultDepositorStats[0]>();
-  for (const s of vaultDepositorStats) {
-    statsMap.set(s.vaultId, s);
-  }
+  const statsMap = new Map(vaultDepositorStats.map((s) => [s.vaultId, s]));
 
-  // Get vault info with latest snapshot
   const latestIds = db
     .select({
       vaultId: vaultSnapshots.vaultId,
@@ -290,38 +245,32 @@ export async function getStickyTvlAnalysis(): Promise<StickyTvlVault[]> {
       eq(vaultSnapshots.id, latestIds.maxId),
     ));
 
-  const results: StickyTvlVault[] = [];
+  return vaultRows
+    .filter((vault) => statsMap.has(vault.id))
+    .map((vault) => {
+      const stats = statsMap.get(vault.id)!;
+      const totalBalance = stats.totalBalanceUsd || 0;
+      const topDepositorPercent = totalBalance > 0 ? (stats.maxBalanceUsd / totalBalance) * 100 : 0;
 
-  for (const vault of vaultRows) {
-    const stats = statsMap.get(vault.id);
-    if (!stats) continue;
-
-    const tvlUsd = vault.tvlUsd ?? 0;
-    const totalBalance = stats.totalBalanceUsd || 0;
-    const topDepositorPercent =
-      totalBalance > 0 ? (stats.maxBalanceUsd / totalBalance) * 100 : 0;
-
-    results.push({
-      address: vault.address,
-      chainId: vault.chainId,
-      name: vault.name,
-      category: vault.category as VaultCategory,
-      tvlUsd,
-      depositorCount: stats.depositorCount,
-      topDepositorPercent: Math.round(topDepositorPercent * 100) / 100,
-      isSingleDepositor: stats.depositorCount === 1,
-    });
-  }
-
-  return results.sort((a, b) => b.tvlUsd - a.tvlUsd);
-}
+      return {
+        address: vault.address,
+        chainId: vault.chainId,
+        name: vault.name,
+        category: vault.category as VaultCategory,
+        tvlUsd: vault.tvlUsd ?? 0,
+        depositorCount: stats.depositorCount,
+        topDepositorPercent: Math.round(topDepositorPercent * 100) / 100,
+        isSingleDepositor: stats.depositorCount === 1,
+      };
+    })
+    .sort((a, b) => b.tvlUsd - a.tvlUsd);
+};
 
 /** Get depositor breakdown for a specific vault */
-export async function getDepositorBreakdown(
+export const getDepositorBreakdown = async (
   address: string,
   chainId: number,
-): Promise<DepositorEntry[]> {
-  // Find the vault
+): Promise<DepositorEntry[]> => {
   const [vault] = await db
     .select({ id: vaults.id })
     .from(vaults)
@@ -333,7 +282,6 @@ export async function getDepositorBreakdown(
 
   if (!vault) return [];
 
-  // Get all depositors for this vault
   const rows = await db
     .select({
       address: depositors.address,
@@ -359,4 +307,4 @@ export async function getDepositorBreakdown(
         : 0,
     }))
     .sort((a, b) => b.balanceUsd - a.balanceUsd);
-}
+};

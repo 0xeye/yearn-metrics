@@ -33,10 +33,10 @@ const CHAINS: Record<number, (typeof optimism) | (typeof base)> = { 10: optimism
  * Price LP tokens by decomposing into underlying reserves.
  * Returns Map<lowercase_lp_address, priceUsd>.
  */
-export async function priceViaSugarOracle(
+export const priceViaSugarOracle = async (
   chainId: number,
   lpAddresses: string[],
-): Promise<Map<string, number>> {
+): Promise<Map<string, number>> => {
   const chain = CHAINS[chainId];
   const prefix = CHAIN_PREFIXES[chainId];
   if (!chain || !prefix) return new Map();
@@ -124,4 +124,4 @@ export async function priceViaSugarOracle(
   }
 
   return prices;
-}
+};

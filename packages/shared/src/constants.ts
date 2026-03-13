@@ -5,20 +5,6 @@ export const DEFILLAMA_PROTOCOLS = [
   "yearn-curating",
 ] as const;
 
-export const CHAIN_IDS = {
-  ethereum: 1,
-  optimism: 10,
-  polygon: 137,
-  fantom: 250,
-  base: 8453,
-  arbitrum: 42161,
-  gnosis: 100,
-  katana: 747474,
-  hyperliquid: 999,
-  berachain: 80094,
-  sonic: 146,
-} as const;
-
 export const CHAIN_NAMES: Record<number, string> = {
   1: "Ethereum",
   10: "Optimism",

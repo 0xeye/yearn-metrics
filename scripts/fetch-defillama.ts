@@ -16,13 +16,13 @@ interface DefillamaProtocol {
   chainTvls: Record<string, { tvl: Array<{ date: number; totalLiquidityUSD: number }> }>;
 }
 
-async function fetchProtocol(slug: string): Promise<DefillamaProtocol> {
+const fetchProtocol = async (slug: string): Promise<DefillamaProtocol> => {
   const res = await fetch(`https://api.llama.fi/protocol/${slug}`);
   if (!res.ok) throw new Error(`DefiLlama error for ${slug}: ${res.status}`);
   return res.json() as Promise<DefillamaProtocol>;
-}
+};
 
-export async function fetchAndStoreDefillamaData() {
+export const fetchAndStoreDefillamaData = async () => {
   const now = new Date().toISOString();
   let totalStored = 0;
 
@@ -62,7 +62,7 @@ export async function fetchAndStoreDefillamaData() {
 
   console.log(`Stored ${totalStored} DefiLlama snapshots`);
   return { stored: totalStored };
-}
+};
 
 if (import.meta.main) {
   const result = await fetchAndStoreDefillamaData();

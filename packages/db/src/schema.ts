@@ -69,6 +69,7 @@ export const strategyReports = sqliteTable("strategy_reports", {
   blockTime: integer("block_time"),
   blockNumber: integer("block_number"),
   transactionHash: text("transaction_hash"),
+  pricingSource: text("pricing_source"),
   timestamp: text("timestamp").notNull(),
 });
 
@@ -89,13 +90,4 @@ export const depositors = sqliteTable("depositors", {
   balanceUsd: real("balance_usd"),
   firstSeen: text("first_seen"),
   lastSeen: text("last_seen"),
-});
-
-export const tvlOverlap = sqliteTable("tvl_overlap", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  sourceVaultId: integer("source_vault_id").notNull().references(() => vaults.id),
-  targetVaultId: integer("target_vault_id").notNull().references(() => vaults.id),
-  strategyAddress: text("strategy_address").notNull(),
-  overlapUsd: real("overlap_usd"),
-  timestamp: text("timestamp").notNull(),
 });

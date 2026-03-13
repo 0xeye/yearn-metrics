@@ -30,18 +30,15 @@ const VAULTS_QUERY = `
   }
 `;
 
-function classifyCategory(vault: KongVault): "v2" | "v3" {
-  if (vault.v3) return "v3";
-  return "v2";
-}
+const classifyCategory = (vault: KongVault): "v2" | "v3" =>
+  vault.v3 ? "v3" : "v2";
 
-function isIgnored(address: string, chainId: number): boolean {
-  return IGNORED_VAULTS.some(
+const isIgnored = (address: string, chainId: number): boolean =>
+  IGNORED_VAULTS.some(
     (v) => v.address.toLowerCase() === address.toLowerCase() && v.chainId === chainId
   );
-}
 
-async function fetchKongVaults(): Promise<KongVault[]> {
+const fetchKongVaults = async (): Promise<KongVault[]> => {
   const res = await fetch(KONG_API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -51,13 +48,12 @@ async function fetchKongVaults(): Promise<KongVault[]> {
   if (!res.ok) throw new Error(`Kong API error: ${res.status} ${res.statusText}`);
   const json = (await res.json()) as { data: { vaults: KongVault[] } };
   return json.data.vaults;
-}
+};
 
-async function upsertVault(kongVault: KongVault): Promise<number> {
+const upsertVault = async (kongVault: KongVault): Promise<number> => {
   const now = new Date().toISOString();
   const category = classifyCategory(kongVault);
 
-  // Check if vault already exists
   const existing = await db.query.vaults.findFirst({
     where: and(
       eq(vaults.address, kongVault.address),
@@ -107,9 +103,9 @@ async function upsertVault(kongVault: KongVault): Promise<number> {
     .returning({ id: vaults.id });
 
   return inserted.id;
-}
+};
 
-async function upsertSnapshot(vaultId: number, kongVault: KongVault) {
+const upsertSnapshot = async (vaultId: number, kongVault: KongVault) => {
   const now = new Date().toISOString();
   await db.insert(vaultSnapshots).values({
     vaultId,
@@ -118,38 +114,28 @@ async function upsertSnapshot(vaultId: number, kongVault: KongVault) {
     totalIdle: kongVault.totalIdle,
     timestamp: now,
   });
-}
+};
 
-async function upsertStrategiesAndDebts(vaultId: number, kongVault: KongVault) {
+const upsertStrategiesAndDebts = async (vaultId: number, kongVault: KongVault) => {
   const now = new Date().toISOString();
 
   if (!kongVault.debts?.length) return;
 
   for (const debt of kongVault.debts) {
-    // Upsert strategy
-    let strategy = await db.query.strategies.findFirst({
+    const existing = await db.query.strategies.findFirst({
       where: and(
         eq(strategies.address, debt.strategy),
         eq(strategies.vaultId, vaultId)
       ),
     });
 
-    let strategyId: number;
-    if (strategy) {
-      strategyId = strategy.id;
-    } else {
-      const [inserted] = await db
-        .insert(strategies)
-        .values({
-          address: debt.strategy,
-          vaultId,
-          chainId: kongVault.chainId,
-        })
-        .returning({ id: strategies.id });
-      strategyId = inserted.id;
-    }
+    const strategyId = existing
+      ? existing.id
+      : (await db
+          .insert(strategies)
+          .values({ address: debt.strategy, vaultId, chainId: kongVault.chainId })
+          .returning({ id: strategies.id }))[0].id;
 
-    // Insert debt snapshot
     await db.insert(strategyDebts).values({
       strategyId,
       vaultId,
@@ -159,9 +145,9 @@ async function upsertStrategiesAndDebts(vaultId: number, kongVault: KongVault) {
       timestamp: now,
     });
   }
-}
+};
 
-async function upsertFees(vaultId: number, kongVault: KongVault) {
+const upsertFees = async (vaultId: number, kongVault: KongVault) => {
   // V2 vaults don't have fees in Kong — use conservative defaults (10% perf, 0% mgmt)
   // Most V2 vaults are 1000/0 on-chain. fetch-v2-fees.ts reads exact on-chain rates.
   const category = classifyCategory(kongVault);
@@ -192,16 +178,15 @@ async function upsertFees(vaultId: number, kongVault: KongVault) {
       updatedAt: now,
     });
   }
-}
+};
 
 /**
  * Fallback pricing for vaults where Kong returns tvl.close = 0 but totalAssets > 0.
  * Fetches current token prices from DefiLlama and computes TVL = totalAssets / 10^decimals * price.
  */
-async function priceMissingTvl(zeroTvlVaults: { vaultId: number; kongVault: KongVault }[]) {
+const priceMissingTvl = async (zeroTvlVaults: { vaultId: number; kongVault: KongVault }[]) => {
   if (zeroTvlVaults.length === 0) return 0;
 
-  // Build unique token keys for batch price fetch
   const tokens = zeroTvlVaults
     .map((v) => {
       const prefix = CHAIN_PREFIXES[v.kongVault.chainId];
@@ -238,7 +223,6 @@ async function priceMissingTvl(zeroTvlVaults: { vaultId: number; kongVault: Kong
     const tvlUsd = Number(totalAssets) / 10 ** decimals * priceInfo.price;
     if (tvlUsd <= 0) continue;
 
-    // Update the most recent snapshot for this vault
     const latestSnapshot = await db.query.vaultSnapshots.findFirst({
       where: eq(vaultSnapshots.vaultId, vault.vaultId),
       orderBy: (s, { desc }) => [desc(s.id)],
@@ -255,22 +239,21 @@ async function priceMissingTvl(zeroTvlVaults: { vaultId: number; kongVault: Kong
   }
 
   return fixed;
-}
+};
 
 /**
  * Fallback 2: Use Velodrome/Aerodrome Sugar Oracle for LP tokens on Optimism/Base
  * that DefiLlama can't price.
  */
-async function priceViaSugarOracleFallback(
+const priceViaSugarOracleFallback = async (
   veloVaults: { vaultId: number; kongVault: KongVault }[],
-) {
-  // Group by chain
-  const byChain = new Map<number, typeof veloVaults>();
-  for (const v of veloVaults) {
+) => {
+  const byChain = veloVaults.reduce((acc, v) => {
     const chain = v.kongVault.chainId;
-    if (!byChain.has(chain)) byChain.set(chain, []);
-    byChain.get(chain)!.push(v);
-  }
+    const arr = acc.get(chain) ?? [];
+    arr.push(v);
+    return acc.set(chain, arr);
+  }, new Map<number, typeof veloVaults>());
 
   let fixed = 0;
   for (const [chainId, chainVaults] of byChain) {
@@ -315,9 +298,9 @@ async function priceViaSugarOracleFallback(
     }
   }
   return fixed;
-}
+};
 
-export async function fetchAndStoreKongData() {
+export const fetchAndStoreKongData = async () => {
   console.log("Fetching vaults from Kong API...");
   const kongVaults = await fetchKongVaults();
   console.log(`Received ${kongVaults.length} vaults from Kong`);
@@ -338,7 +321,6 @@ export async function fetchAndStoreKongData() {
     await upsertFees(vaultId, kv);
     stored++;
 
-    // Track vaults with 0 TVL but non-zero totalAssets for fallback pricing
     const tvl = kv.tvl?.close ?? 0;
     const totalAssets = BigInt(kv.totalAssets || "0");
     if (tvl === 0 && totalAssets > 0n) {
@@ -348,17 +330,15 @@ export async function fetchAndStoreKongData() {
 
   console.log(`Stored ${stored} vaults, skipped ${skipped} ignored`);
 
-  // Fallback 1: price vaults via DefiLlama current prices
   if (zeroTvlVaults.length > 0) {
     console.log(`\nFallback 1 (DefiLlama) for ${zeroTvlVaults.length} vaults with 0 TVL...`);
     const fixed = await priceMissingTvl(zeroTvlVaults);
     console.log(`Priced ${fixed}/${zeroTvlVaults.length} vaults via DefiLlama`);
   }
 
-  // Fallback 2: Sugar Oracle for Velo/Aero LP tokens still at 0 (chains 10, 8453)
-  const stillZero = zeroTvlVaults.filter((v) => {
-    return (v.kongVault.chainId === 10 || v.kongVault.chainId === 8453);
-  });
+  const stillZero = zeroTvlVaults.filter((v) =>
+    v.kongVault.chainId === 10 || v.kongVault.chainId === 8453,
+  );
   if (stillZero.length > 0) {
     console.log(`\nFallback 2 (Sugar Oracle) for ${stillZero.length} Optimism/Base vaults...`);
     const fixed = await priceViaSugarOracleFallback(stillZero);
@@ -366,7 +346,7 @@ export async function fetchAndStoreKongData() {
   }
 
   return { stored, skipped, total: kongVaults.length };
-}
+};
 
 // Run directly
 if (import.meta.main) {
