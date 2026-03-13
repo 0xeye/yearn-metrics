@@ -71,12 +71,21 @@ bun run fetch:depositors                # Depositor data (Ethereum only)
 
 ### Running the dashboard
 
+**Local development** (API + dashboard together):
+
 ```bash
 bun run dev:api          # Terminal 1: API server on :3456
 bun run dev:dashboard    # Terminal 2: React dashboard on :5173
 ```
 
-Open `http://localhost:5173`. The dashboard has 5 tabs:
+Open `http://localhost:5173`. In local dev, the Vite proxy forwards `/api/*` to `:3456`, so `VITE_API_URL` is not needed.
+
+**Production** — the dashboard is hosted on Vercel and reads from the Fly.io API:
+
+- Dashboard: https://yearn-metrics-dashboard.vercel.app
+- API: https://yearn-metrics.fly.dev
+
+The dashboard has 5 tabs:
 - **Overview** — Total TVL by chain and category (V1/V2/V3/Curation), overlap deduction, vault counts
 - **Comparison** — Our TVL vs DefiLlama (yearn-finance + yearn-curating), per-chain and per-category deltas
 - **Fees** — Fee revenue from harvests (performance + management fees), weekly/monthly history
@@ -85,18 +94,18 @@ Open `http://localhost:5173`. The dashboard has 5 tabs:
 
 ### API endpoints
 
-All endpoints return JSON. Base URL: `http://localhost:3456`
+All endpoints return JSON. Production base: `https://yearn-metrics.fly.dev`, local: `http://localhost:3456`
 
 ```
 GET /health                                  # Health check
 
-GET /api/tvl/                                # TVL summary (totals, by chain, by category)
+GET /api/tvl                                 # TVL summary (totals, by chain, by category)
 GET /api/tvl/vaults?chainId=1&category=v2    # Per-vault list (filterable)
 GET /api/tvl/overlap                         # Vault→vault overlap details (auto + registry)
 
-GET /api/comparison/                         # Our TVL vs DefiLlama
+GET /api/comparison                          # Our TVL vs DefiLlama
 
-GET /api/fees/?since=1709251200              # Fee summary (optional since= unix ts)
+GET /api/fees?since=1709251200               # Fee summary (optional since= unix ts)
 GET /api/fees/vaults?since=1709251200        # Per-vault fee breakdown
 GET /api/fees/history?interval=weekly        # Fee history (weekly|monthly)
 
@@ -113,6 +122,71 @@ bun run audit
 ```
 
 The TUI shows a hierarchical breakdown: Chain → Category (Allocation/Strategies/Curators) → Vault → Strategy. Use number keys 1-3 to toggle category visibility for double-count analysis.
+
+## Deployment
+
+### Hosting overview
+
+| Component | Host | URL |
+|-----------|------|-----|
+| API | Fly.io (free tier) | https://yearn-metrics.fly.dev |
+| Dashboard | Vercel (free tier) | https://yearn-metrics-dashboard.vercel.app |
+
+The API runs as a Docker container on Fly.io with a 1GB persistent volume at `/data/` for the SQLite DB. The dashboard is a static Vite build on Vercel that calls the API via `VITE_API_URL` (baked in at build time). CORS is enabled on the API.
+
+The Fly machine has `auto_stop_machines = "stop"` — it sleeps when idle and wakes on first request (cold start ~2-3s).
+
+### Updating the production database
+
+Seed locally, then upload the DB file to Fly:
+
+```bash
+# 1. Seed locally
+bun run seed
+bun run fetch:reports                       # optional extras
+bun run scripts/fetch-v2-fees.ts
+bun run scripts/reprice-reports.ts
+
+# 2. Upload to Fly
+fly ssh console -C "rm /data/yearn-tvl.db /data/yearn-tvl.db-shm /data/yearn-tvl.db-wal"
+fly ssh sftp shell
+# then: put packages/db/yearn-tvl.db /data/yearn-tvl.db
+
+# 3. Restart to pick up new DB
+fly machines list                           # get machine ID
+fly machine restart <machine-id>
+
+# 4. Verify
+curl https://yearn-metrics.fly.dev/api/tvl
+```
+
+### Deploying API changes
+
+```bash
+fly deploy                                  # builds Docker image and deploys
+```
+
+The `Dockerfile` strips the `scripts` workspace from `package.json` (only `packages/*` are needed at runtime). If you add new workspace packages the API depends on, update the Dockerfile `COPY` steps.
+
+### Deploying dashboard changes
+
+```bash
+cd packages/dashboard
+vercel deploy --yes --prod                  # builds on Vercel with VITE_API_URL from project env
+```
+
+`VITE_API_URL` is set as a Vercel project env var (production). To change it: `vercel env rm VITE_API_URL production && echo "https://new-url" | vercel env add VITE_API_URL production`, then redeploy.
+
+### Fly.io useful commands
+
+```bash
+fly status                                  # App status
+fly machines list                           # List machines + IDs
+fly ssh console -C "<cmd>"                  # Run command on the machine
+fly ssh sftp shell                          # Interactive file transfer
+fly logs                                    # Stream live logs
+fly volumes list                            # Volume info
+```
 
 ## Architecture
 
@@ -141,7 +215,7 @@ Hono REST API on port 3456. Four route groups, each backed by a service:
 - `/api/analysis` — Dead TVL classification (no reports in 365d), retired vault TVL, depositor concentration.
 
 ### packages/dashboard
-React 19 + Vite + Recharts. 5 tabs: Overview, Comparison, Fees, Analysis, Vaults. Uses `useFetch<T>` hook to call API. Vite proxies `/api/*` to the API server.
+React 19 + Vite + Recharts. 5 tabs: Overview, Comparison, Fees, Analysis, Vaults. Uses `useFetch<T>` hook which prepends `VITE_API_URL` to all fetch calls (empty string in local dev → Vite proxy handles it; full URL in production → direct to Fly.io API). Standalone `tsconfig.json` (no `extends`) so it builds independently on Vercel.
 
 ### scripts/
 Each script fetches from an external source and upserts into the DB:
@@ -174,7 +248,11 @@ Each script fetches from an external source and upserts into the DB:
 
 ## Environment
 
-`.env` at project root with `ETH_RPC_URL` and per-chain RPCs as `RPC_URI_FOR_{chainId}`. Never committed. Required for V1 vaults, V2 fee reads, curation Turtle Club reads (viem).
+`.env` at project root. Never committed.
+
+- `VITE_API_URL` — Production API URL for the dashboard (e.g. `https://yearn-metrics.fly.dev`). Not needed for local dev (Vite proxy handles it). Also set as a Vercel project env var.
+- `DB_PATH` — Override SQLite path (default: `packages/db/yearn-tvl.db`). Set to `/data/yearn-tvl.db` on Fly.io.
+- `ETH_RPC_URL` and `RPC_URI_FOR_{chainId}` — Per-chain RPCs. Required for V1 vaults, V2 fee reads, curation Turtle Club reads (viem).
 
 ## Conventions
 

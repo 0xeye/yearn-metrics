@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { tvl } from "./routes/tvl.js";
 import { comparison } from "./routes/comparison.js";
 import { fees } from "./routes/fees.js";
@@ -7,6 +8,8 @@ import { profitability } from "./routes/profitability.js";
 
 const PORT = Number(process.env.PORT) || 3456;
 const app = new Hono();
+
+app.use("/*", cors());
 
 app.get("/health", (c) => {
   return c.json({ status: "ok", timestamp: new Date().toISOString() });

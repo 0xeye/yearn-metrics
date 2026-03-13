@@ -1,4 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+
+const API_BASE = import.meta.env.VITE_API_URL || "";
 
 export function useFetch<T>(url: string) {
   const [data, setData] = useState<T | null>(null);
@@ -7,7 +9,7 @@ export function useFetch<T>(url: string) {
 
   useEffect(() => {
     setLoading(true);
-    fetch(url)
+    fetch(`${API_BASE}${url}`)
       .then((r) => {
         if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
         return r.json();
@@ -36,4 +38,51 @@ export function pct(n: number): string {
 
 export function shortAddr(addr: string): string {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+}
+
+export function useSort(defaultKey: string, defaultDir: "asc" | "desc" = "desc") {
+  const [sortKey, setSortKey] = useState(defaultKey);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">(defaultDir);
+
+  const handleSort = useCallback((key: string) => {
+    setSortKey((prev) => {
+      if (prev === key) {
+        setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+        return prev;
+      }
+      setSortDir("desc");
+      return key;
+    });
+  }, []);
+
+  const sortArrow = useCallback(
+    (key: string) => (sortKey === key ? (sortDir === "desc" ? " \u25BC" : " \u25B2") : ""),
+    [sortKey, sortDir],
+  );
+
+  const sorted = useCallback(
+    function <T>(items: T[], accessors: Record<string, (item: T) => number | string>): T[] {
+      const accessor = accessors[sortKey];
+      if (!accessor) return items;
+      const dir = sortDir === "desc" ? -1 : 1;
+      return [...items].sort((a, b) => {
+        const aVal = accessor(a);
+        const bVal = accessor(b);
+        if (typeof aVal === "string" && typeof bVal === "string") return aVal.localeCompare(bVal) * dir;
+        return ((aVal as number) - (bVal as number)) * dir;
+      });
+    },
+    [sortKey, sortDir],
+  );
+
+  const th = useCallback(
+    (key: string, label: string, className?: string) => ({
+      className: `sortable ${className || ""}`.trim(),
+      onClick: () => handleSort(key),
+      children: `${label}${sortKey === key ? (sortDir === "desc" ? " \u25BC" : " \u25B2") : ""}`,
+    }),
+    [handleSort, sortKey, sortDir],
+  );
+
+  return { sortKey, sortDir, handleSort, sortArrow, sorted, th };
 }

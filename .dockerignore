@@ -1,0 +1,5 @@
+node_modules
+packages/dashboard
+packages/db/yearn-tvl.db
+.env
+.git
