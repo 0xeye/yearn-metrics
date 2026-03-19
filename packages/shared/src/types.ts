@@ -9,6 +9,8 @@ export interface TvlSummary {
   v3Tvl: number;
   curationTvl: number;
   overlapAmount: number;
+  crossChainOverlap: number;
+  crossChainOverlapByCategory: Record<VaultCategory, number>;
   tvlByChain: Record<string, number>;
   tvlByCategory: Record<VaultCategory, number>;
   retiredTvlByCategory: Record<VaultCategory, number>;

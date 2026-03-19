@@ -115,7 +115,14 @@ export const fetchV1Vaults = async () => {
       // TVL = totalSupply * pricePerFullShare / 1e18 (in underlying tokens)
       const underlyingAmount =
         Number(v.totalSupply) * Number(v.pricePerFullShare) / 1e18 / 10 ** v.tokenDecimals;
-      const tokenPrice = prices.get(v.token.toLowerCase()) ?? 0;
+      let tokenPrice = prices.get(v.token.toLowerCase()) ?? 0;
+
+      // Stablecoin Curve LP fallback: ~$1/token for pools composed of stablecoins
+      if (tokenPrice === 0) {
+        const stableLPSymbols = ["yDAI+yUSDC+yUSDT+yTUSD", "yDAI+yUSDC+yUSDT+yBUSD", "crvPlain3andSUSD", "dusd3CRV", "usdp3CRV", "musd3CRV", "ust3CRV", "gusd3CRV", "husd3CRV", "usdn3CRV", "rsv3CRV", "tusd3CRV", "busd3CRV", "pax3CRV"];
+        if (stableLPSymbols.includes(v.tokenSymbol)) tokenPrice = 1;
+      }
+
       const tvlUsd = underlyingAmount * tokenPrice;
 
       // Upsert vault

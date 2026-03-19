@@ -5,8 +5,8 @@
  * Run manually: bun run scripts/detect-overlaps.ts
  * Output: candidates to add to STRATEGY_OVERLAP_REGISTRY in packages/shared/src/strategy-overlaps.ts
  */
-import { createPublicClient, http, parseAbi, type Address } from "viem";
-import { mainnet, optimism, base, arbitrum, polygon } from "viem/chains";
+import { createPublicClient, http, parseAbi, defineChain, type Address } from "viem";
+import { mainnet, optimism, base, arbitrum, polygon, fantom, gnosis } from "viem/chains";
 import { db, vaults, strategies, strategyDebts } from "@yearn-tvl/db";
 import { eq, and, desc } from "drizzle-orm";
 import type { VaultCategory } from "@yearn-tvl/shared";
@@ -15,12 +15,30 @@ const ERC20_ABI = parseAbi([
   "function balanceOf(address) view returns (uint256)",
 ]);
 
+const katana = defineChain({
+  id: 747474,
+  name: "Katana",
+  nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+  rpcUrls: { default: { http: [] } },
+});
+
+const hyperliquid = defineChain({
+  id: 999,
+  name: "Hyperliquid",
+  nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+  rpcUrls: { default: { http: [] } },
+});
+
 const chains: Record<number, { chain: any; rpcEnv: string }> = {
   1: { chain: mainnet, rpcEnv: "RPC_URI_FOR_1" },
   10: { chain: optimism, rpcEnv: "RPC_URI_FOR_10" },
   137: { chain: polygon, rpcEnv: "RPC_URI_FOR_137" },
+  250: { chain: fantom, rpcEnv: "RPC_URI_FOR_250" },
   8453: { chain: base, rpcEnv: "RPC_URI_FOR_8453" },
   42161: { chain: arbitrum, rpcEnv: "RPC_URI_FOR_42161" },
+  100: { chain: gnosis, rpcEnv: "RPC_URI_FOR_100" },
+  747474: { chain: katana, rpcEnv: "RPC_URI_FOR_747474" },
+  999: { chain: hyperliquid, rpcEnv: "RPC_URI_FOR_999" },
 };
 
 const getClient = (chainId: number) => {

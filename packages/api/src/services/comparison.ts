@@ -61,10 +61,12 @@ export const getComparison = async (): Promise<DefillamaComparison> => {
     .filter((c) => c.ours > 0 || c.defillama > 0)
     .sort((a, b) => Math.abs(b.difference) - Math.abs(a.difference));
 
-  // Per-category — includes retired TVL since totalTvl now counts it
+  // Per-category — includes retired TVL, deducts both auto/registry overlap AND cross-chain overlap
   const retiredV1V2V3 = (ourTvl.retiredTvlByCategory.v1 || 0) + (ourTvl.retiredTvlByCategory.v2 || 0) + (ourTvl.retiredTvlByCategory.v3 || 0);
   const retiredCuration = ourTvl.retiredTvlByCategory.curation || 0;
-  const v2v3Ours = ourTvl.v1Tvl + ourTvl.v2Tvl + ourTvl.v3Tvl + retiredV1V2V3 - ourTvl.overlapAmount;
+  const ccV1V2V3 = (ourTvl.crossChainOverlapByCategory.v1 || 0) + (ourTvl.crossChainOverlapByCategory.v2 || 0) + (ourTvl.crossChainOverlapByCategory.v3 || 0);
+  const ccCuration = ourTvl.crossChainOverlapByCategory.curation || 0;
+  const v2v3Ours = ourTvl.v1Tvl + ourTvl.v2Tvl + ourTvl.v3Tvl + retiredV1V2V3 - ourTvl.overlapAmount - ccV1V2V3;
   const v2v3DL = dlFinance["total"] || 0;
   const curationDL = dlCurating["total"] || 0;
 
@@ -79,16 +81,16 @@ export const getComparison = async (): Promise<DefillamaComparison> => {
     {
       category: "Curation",
       defillamaProtocol: "yearn-curating",
-      ours: ourTvl.curationTvl + retiredCuration,
+      ours: ourTvl.curationTvl + retiredCuration - ccCuration,
       defillama: curationDL,
-      difference: ourTvl.curationTvl + retiredCuration - curationDL,
+      difference: ourTvl.curationTvl + retiredCuration - ccCuration - curationDL,
     },
   ];
 
   // Generate notes explaining discrepancies
   const diffPct = dlTotal > 0 ? Math.abs((ourTvl.totalTvl - dlTotal) / dlTotal) * 100 : 0;
   const v2v3DiffPct = v2v3DL > 0 ? Math.abs((v2v3Ours - v2v3DL) / v2v3DL) * 100 : 0;
-  const curationDiff = ourTvl.curationTvl + retiredCuration - curationDL;
+  const curationDiff = ourTvl.curationTvl + retiredCuration - ccCuration - curationDL;
 
   const notes = [
     diffPct < 5 && `Total TVL within ${diffPct.toFixed(1)}% of DefiLlama — good alignment.`,
