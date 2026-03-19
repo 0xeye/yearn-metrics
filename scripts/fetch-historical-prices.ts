@@ -36,18 +36,12 @@ const getUniqueAssets = async (): Promise<AssetInfo[]> => {
     .from(vaults)
     .where(isNotNull(vaults.assetAddress));
 
-  const seen = new Set<string>();
-  const assets: AssetInfo[] = [];
-  for (const row of rows) {
-    if (!row.address) continue;
-    const key = `${row.chainId}:${row.address.toLowerCase()}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    // Only include chains DL supports
-    if (!CHAIN_PREFIXES[row.chainId]) continue;
-    assets.push({ chainId: row.chainId, address: row.address, symbol: row.symbol });
-  }
-  return assets;
+  const deduped = new Map(
+    rows
+      .filter((row): row is typeof row & { address: string } => !!row.address && !!CHAIN_PREFIXES[row.chainId])
+      .map((row) => [`${row.chainId}:${row.address.toLowerCase()}`, { chainId: row.chainId, address: row.address, symbol: row.symbol }]),
+  );
+  return [...deduped.values()];
 };
 
 /** Get the earliest report blockTime (post-2020) */
@@ -65,13 +59,12 @@ const getAllExistingTimestamps = async (): Promise<Map<string, Set<number>>> => 
     .select({ chainId: assetPrices.chainId, address: assetPrices.address, timestamp: assetPrices.timestamp })
     .from(assetPrices);
 
-  const result = new Map<string, Set<number>>();
-  for (const row of rows) {
+  return rows.reduce((acc, row) => {
     const key = `${row.chainId}:${row.address}`;
-    if (!result.has(key)) result.set(key, new Set());
-    result.get(key)!.add(row.timestamp);
-  }
-  return result;
+    const existing = acc.get(key) ?? new Set<number>();
+    existing.add(row.timestamp);
+    return acc.set(key, existing);
+  }, new Map<string, Set<number>>());
 };
 
 /** Batch-fetch prices from DefiLlama for multiple assets at a single timestamp */
@@ -149,23 +142,23 @@ export const fetchHistoricalPrices = async () => {
   // For assets with existing prices, only fetch weeks AFTER the latest cached week.
   // Historical gaps are permanent DL limitations — don't retry them.
   // For new assets (no cached prices), fetch from the beginning.
-  const assetFetchAfter = new Map<string, number>();
-  for (const asset of pricableAssets) {
-    const key = `${asset.chainId}:${asset.address.toLowerCase()}`;
-    const existing = existingByAsset.get(key)!;
-    if (existing.size > 0) {
-      assetFetchAfter.set(key, Math.max(...existing));
-    }
-  }
+  const assetFetchAfter = new Map(
+    pricableAssets
+      .map((asset) => {
+        const key = `${asset.chainId}:${asset.address.toLowerCase()}`;
+        const existing = existingByAsset.get(key)!;
+        return existing.size > 0 ? ([key, Math.max(...existing)] as const) : null;
+      })
+      .filter((entry): entry is [string, number] => entry !== null),
+  );
 
   // Count how many we need to fetch
-  let totalNeeded = 0;
-  for (const asset of pricableAssets) {
+  const totalNeeded = pricableAssets.reduce((sum, asset) => {
     const key = `${asset.chainId}:${asset.address.toLowerCase()}`;
     const existing = existingByAsset.get(key)!;
     const fetchAfter = assetFetchAfter.get(key) || 0;
-    totalNeeded += weeks.filter((w) => !existing.has(w) && w > fetchAfter).length;
-  }
+    return sum + weeks.filter((w) => !existing.has(w) && w > fetchAfter).length;
+  }, 0);
   const cached = [...existingByAsset.values()].reduce((sum, s) => sum + s.size, 0);
   console.log(`Need to fetch ${totalNeeded} new price points (${cached} already cached)\n`);
 

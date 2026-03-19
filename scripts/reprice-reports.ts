@@ -26,13 +26,12 @@ const buildPriceCache = async (): Promise<Map<string, { ts: number; price: numbe
     })
     .from(assetPrices);
 
-  const cache = new Map<string, { ts: number; price: number }[]>();
-  for (const row of allPrices) {
+  const cache = allPrices.reduce((acc, row) => {
     const key = `${row.chainId}:${row.address}`;
-    const arr = cache.get(key) ?? [];
+    const arr = acc.get(key) ?? [];
     arr.push({ ts: row.timestamp, price: row.priceUsd });
-    cache.set(key, arr);
-  }
+    return acc.set(key, arr);
+  }, new Map<string, { ts: number; price: number }[]>());
 
   for (const arr of cache.values()) {
     arr.sort((a, b) => a.ts - b.ts);
@@ -112,16 +111,15 @@ export const repriceReports = async () => {
   console.log(`Found ${reports.length} reports with raw gains to reprice\n`);
 
   // Build vault info cache
-  const vaultInfoCache = new Map<number, { assetAddress: string; assetDecimals: number; chainId: number }>();
   const allVaults = await db
     .select({ id: vaults.id, assetAddress: vaults.assetAddress, assetDecimals: vaults.assetDecimals, chainId: vaults.chainId })
     .from(vaults);
 
-  for (const v of allVaults) {
-    if (v.assetAddress) {
-      vaultInfoCache.set(v.id, { assetAddress: v.assetAddress, assetDecimals: v.assetDecimals || 18, chainId: v.chainId });
-    }
-  }
+  const vaultInfoCache = new Map(
+    allVaults
+      .filter((v): v is typeof v & { assetAddress: string } => !!v.assetAddress)
+      .map((v) => [v.id, { assetAddress: v.assetAddress, assetDecimals: v.assetDecimals || 18, chainId: v.chainId }] as const),
+  );
 
   // Load the full price cache into memory
   console.log("Loading asset price cache...");

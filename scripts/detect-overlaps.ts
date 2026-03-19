@@ -9,7 +9,7 @@ import { createPublicClient, http, parseAbi, defineChain, type Address } from "v
 import { mainnet, optimism, base, arbitrum, polygon, fantom, gnosis } from "viem/chains";
 import { db, vaults, strategies, strategyDebts } from "@yearn-tvl/db";
 import { eq, and, desc } from "drizzle-orm";
-import type { VaultCategory } from "@yearn-tvl/shared";
+import { groupBy } from "@yearn-tvl/shared";
 
 const ERC20_ABI = parseAbi([
   "function balanceOf(address) view returns (uint256)",
@@ -80,12 +80,7 @@ const main = async () => {
 
   console.log(`Checking ${nonVaultStrategies.length} strategies for vault share holdings...\n`);
 
-  // Group by chain
-  const byChain = nonVaultStrategies.reduce((acc, s) => {
-    const arr = acc.get(s.chainId) ?? [];
-    arr.push(s);
-    return acc.set(s.chainId, arr);
-  }, new Map<number, typeof nonVaultStrategies>());
+  const byChain = groupBy(nonVaultStrategies, (s) => s.chainId);
 
   const candidates: Array<{
     strategyAddress: string;

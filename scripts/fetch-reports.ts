@@ -96,6 +96,30 @@ const rawGainToUsd = (rawGain: string | null, decimals: number, tokenPrice: numb
   }
 };
 
+/** Compute the final gainUsd for a report, repricing via token price if Kong returned 0 */
+const resolveGainUsd = (
+  report: KongVaultReport,
+  decimals: number,
+  tokenPrice: number | null,
+): { gainUsd: number | null; repriced: boolean } => {
+  const kongGain = report.gainUsd;
+
+  // If Kong provided a valid price, use it (unless corrupted)
+  if (kongGain && kongGain !== 0) {
+    return { gainUsd: kongGain > MAX_GAIN_PER_REPORT ? 0 : kongGain, repriced: false };
+  }
+
+  // Try repricing from raw gain x token price
+  if (report.gain && report.gain !== "0" && tokenPrice && tokenPrice > 0) {
+    const computed = rawGainToUsd(report.gain, decimals, tokenPrice);
+    if (computed > 0 && computed <= MAX_GAIN_PER_REPORT) {
+      return { gainUsd: computed, repriced: true };
+    }
+  }
+
+  return { gainUsd: kongGain ?? null, repriced: false };
+};
+
 export const fetchAndStoreReports = async () => {
   console.log("Fetching vault harvest reports from Kong...");
 
@@ -124,13 +148,10 @@ export const fetchAndStoreReports = async () => {
       const existingHashes = new Set(existing.map((e) => e.hash));
 
       // Lazily compute token price only if needed (some report has gainUsd=0 but gain>0)
-      let tokenPrice: number | null = null;
       const needsRepricing = reports.some(
         (r) => !existingHashes.has(r.transactionHash) && !(r.gainUsd) && r.gain && r.gain !== "0",
       );
-      if (needsRepricing) {
-        tokenPrice = await getTokenPrice(vault.id, decimals);
-      }
+      const tokenPrice = needsRepricing ? await getTokenPrice(vault.id, decimals) : null;
 
       let newCount = 0;
       let vaultGain = 0;
@@ -138,19 +159,11 @@ export const fetchAndStoreReports = async () => {
       for (const r of reports) {
         if (existingHashes.has(r.transactionHash)) continue;
 
-        let gainUsd = r.gainUsd;
-
-        // If Kong failed to price, compute from raw gain × token price
-        if ((!gainUsd || gainUsd === 0) && r.gain && r.gain !== "0" && tokenPrice && tokenPrice > 0) {
-          gainUsd = rawGainToUsd(r.gain, decimals, tokenPrice);
-          if (gainUsd > 0) {
-            repricedCount++;
-            repricedUsd += gainUsd;
-          }
+        const { gainUsd, repriced } = resolveGainUsd(r, decimals, tokenPrice);
+        if (repriced && gainUsd) {
+          repricedCount++;
+          repricedUsd += gainUsd;
         }
-
-        // Cap corrupted values
-        if (gainUsd && gainUsd > MAX_GAIN_PER_REPORT) gainUsd = 0;
 
         await db.insert(strategyReports).values({
           vaultId: vault.id,

@@ -33,6 +33,39 @@ export const CHAIN_PREFIXES: Record<number, string> = {
   146: "sonic",
 };
 
+const DL_BASE_URL = "https://coins.llama.fi/prices";
+
+/**
+ * Fetch current USD prices for multiple tokens from DefiLlama.
+ * Returns Map<lowercase_address, price>.
+ */
+export const fetchCurrentPrices = async (
+  tokens: { chainId: number; address: string }[],
+): Promise<Map<string, number>> => {
+  const coinKeys = tokens
+    .map((t) => {
+      const prefix = CHAIN_PREFIXES[t.chainId];
+      return prefix ? `${prefix}:${t.address}` : null;
+    })
+    .filter(Boolean)
+    .join(",");
+
+  if (!coinKeys) return new Map();
+
+  try {
+    const res = await fetch(`${DL_BASE_URL}/current/${coinKeys}`);
+    if (!res.ok) return new Map();
+    const data = (await res.json()) as { coins: Record<string, { price: number }> };
+    return new Map(
+      Object.entries(data.coins)
+        .filter(([, info]) => info.price > 0)
+        .map(([key, info]) => [key.split(":")[1]?.toLowerCase() ?? "", info.price]),
+    );
+  } catch {
+    return new Map();
+  }
+};
+
 /**
  * DefiLlama Coins API provider.
  * Uses https://coins.llama.fi/prices/historical/{timestamp}/{chain}:{address}

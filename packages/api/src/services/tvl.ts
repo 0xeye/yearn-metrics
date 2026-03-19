@@ -200,11 +200,14 @@ export const calculateTvl = async (): Promise<TvlSummary> => {
   const crossChainVaults = snapshots.filter(({ vault }) =>
     vault.isRetired && crossChainAddresses.has(`${vault.chainId}:${vault.address.toLowerCase()}`),
   );
+  const crossChainOverlapByCategory = crossChainVaults.reduce(
+    (acc, { vault, snapshot }) => {
+      const cat = vault.category as VaultCategory;
+      return { ...acc, [cat]: acc[cat] + (snapshot.tvlUsd ?? 0) };
+    },
+    { v1: 0, v2: 0, v3: 0, curation: 0 } as Record<VaultCategory, number>,
+  );
   const crossChainOverlap = crossChainVaults.reduce((sum, { snapshot }) => sum + (snapshot.tvlUsd ?? 0), 0);
-  const crossChainOverlapByCategory: Record<VaultCategory, number> = { v1: 0, v2: 0, v3: 0, curation: 0 };
-  for (const { vault, snapshot } of crossChainVaults) {
-    crossChainOverlapByCategory[vault.category as VaultCategory] += snapshot.tvlUsd ?? 0;
-  }
 
   return {
     totalTvl: activeRaw + retiredRaw - totalOverlap - crossChainOverlap,

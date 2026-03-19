@@ -14,12 +14,8 @@ export const toMondayNoon = (ts: number): number => {
 
 /** Generate weekly Monday-noon timestamps from start to end */
 export const weeklyTimestamps = (startTs: number, endTs: number): number[] => {
-  const weeks: number[] = [];
-  let ts = toMondayNoon(startTs);
+  const start = toMondayNoon(startTs);
   const end = toMondayNoon(endTs);
-  while (ts <= end) {
-    weeks.push(ts);
-    ts += WEEK_SECONDS;
-  }
-  return weeks;
+  const count = Math.max(0, Math.floor((end - start) / WEEK_SECONDS) + 1);
+  return Array.from({ length: count }, (_, i) => start + i * WEEK_SECONDS);
 };

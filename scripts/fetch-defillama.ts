@@ -22,44 +22,36 @@ const fetchProtocol = async (slug: string): Promise<DefillamaProtocol> => {
   return res.json() as Promise<DefillamaProtocol>;
 };
 
+const isValidChain = (chain: string): boolean =>
+  !chain.includes("-") && chain !== "staking" && chain !== "pool2";
+
 export const fetchAndStoreDefillamaData = async () => {
   const now = new Date().toISOString();
-  let totalStored = 0;
 
-  for (const protocol of DEFILLAMA_PROTOCOLS) {
-    console.log(`Fetching DefiLlama data for ${protocol}...`);
-    const data = await fetchProtocol(protocol);
+  const results = await Promise.all(
+    DEFILLAMA_PROTOCOLS.map(async (protocol) => {
+      console.log(`Fetching DefiLlama data for ${protocol}...`);
+      const data = await fetchProtocol(protocol);
 
-    // Store per-chain current TVL
-    for (const [chain, tvl] of Object.entries(data.currentChainTvls)) {
-      // Skip staking/pool2/borrowed variants
-      if (chain.includes("-") || chain === "staking" || chain === "pool2") continue;
+      const chainEntries = Object.entries(data.currentChainTvls).filter(([chain]) => isValidChain(chain));
 
-      await db.insert(defillamaSnapshots).values({
-        protocol,
-        chain,
-        tvlUsd: tvl,
-        timestamp: now,
-      });
-      totalStored++;
-    }
+      // Store per-chain current TVL
+      await Promise.all(
+        chainEntries.map(([chain, tvl]) =>
+          db.insert(defillamaSnapshots).values({ protocol, chain, tvlUsd: tvl, timestamp: now }),
+        ),
+      );
 
-    // Store total
-    const totalTvl = Object.entries(data.currentChainTvls)
-      .filter(([chain]) => !chain.includes("-") && chain !== "staking" && chain !== "pool2")
-      .reduce((sum, [, tvl]) => sum + tvl, 0);
+      // Store total
+      const totalTvl = chainEntries.reduce((sum, [, tvl]) => sum + tvl, 0);
+      await db.insert(defillamaSnapshots).values({ protocol, chain: "total", tvlUsd: totalTvl, timestamp: now });
 
-    await db.insert(defillamaSnapshots).values({
-      protocol,
-      chain: "total",
-      tvlUsd: totalTvl,
-      timestamp: now,
-    });
-    totalStored++;
+      console.log(`  ${protocol}: $${(totalTvl / 1e6).toFixed(1)}M total`);
+      return chainEntries.length + 1; // per-chain + total
+    }),
+  );
 
-    console.log(`  ${protocol}: $${(totalTvl / 1e6).toFixed(1)}M total`);
-  }
-
+  const totalStored = results.reduce((sum, n) => sum + n, 0);
   console.log(`Stored ${totalStored} DefiLlama snapshots`);
   return { stored: totalStored };
 };

@@ -3,11 +3,11 @@
  * V1 vaults use getPricePerFullShare() instead of totalAssets().
  * TVL = totalSupply × pricePerFullShare / 1e18, priced via DefiLlama.
  */
-import { createPublicClient, http, parseAbi, formatUnits, getAddress } from "viem";
+import { createPublicClient, http, parseAbi, getAddress } from "viem";
 import { mainnet } from "viem/chains";
 import { db, vaults, vaultSnapshots } from "@yearn-tvl/db";
 import { eq, and } from "drizzle-orm";
-import { V1_VAULTS } from "@yearn-tvl/shared";
+import { V1_VAULTS, fetchCurrentPrices } from "@yearn-tvl/shared";
 
 const V1_ABI = parseAbi([
   "function token() view returns (address)",
@@ -22,24 +22,55 @@ const ERC20_ABI = parseAbi([
   "function decimals() view returns (uint8)",
 ]);
 
-const DL_PRICE_URL = "https://coins.llama.fi/prices/current";
+const STABLE_LP_SYMBOLS = [
+  "yDAI+yUSDC+yUSDT+yTUSD", "yDAI+yUSDC+yUSDT+yBUSD", "crvPlain3andSUSD",
+  "dusd3CRV", "usdp3CRV", "musd3CRV", "ust3CRV", "gusd3CRV", "husd3CRV",
+  "usdn3CRV", "rsv3CRV", "tusd3CRV", "busd3CRV", "pax3CRV",
+];
 
-const fetchTokenPrices = async (addresses: string[]): Promise<Map<string, number>> => {
-  const coins = addresses.map((a) => `ethereum:${a}`).join(",");
-  try {
-    const res = await fetch(`${DL_PRICE_URL}/${coins}`);
-    if (!res.ok) return new Map();
-    const data = (await res.json()) as {
-      coins: Record<string, { price: number }>;
-    };
-    return new Map(
-      Object.entries(data.coins)
-        .map(([key, info]) => [key.split(":")[1]?.toLowerCase(), info.price] as const)
-        .filter(([addr, price]) => addr && price > 0) as [string, number][],
-    );
-  } catch {
-    return new Map();
+interface V1Data {
+  address: `0x${string}`;
+  token: string;
+  tokenSymbol: string;
+  tokenDecimals: number;
+  name: string;
+  totalSupply: bigint;
+  pricePerFullShare: bigint;
+  decimals: number;
+}
+
+const upsertVault = async (
+  existing: { id: number } | undefined,
+  addr: string,
+  v: V1Data,
+  now: string,
+): Promise<number> => {
+  const shared = {
+    name: v.name,
+    category: "v1" as const,
+    source: "onchain" as const,
+    assetAddress: v.token,
+    assetSymbol: v.tokenSymbol,
+    assetDecimals: v.tokenDecimals,
+    isRetired: false,
+  };
+
+  if (existing) {
+    await db.update(vaults).set({ ...shared, updatedAt: now })
+      .where(eq(vaults.id, existing.id));
+    return existing.id;
   }
+
+  const [inserted] = await db.insert(vaults).values({
+    ...shared,
+    address: addr,
+    chainId: 1,
+    v3: false,
+    yearn: true,
+    createdAt: now,
+    updatedAt: now,
+  }).returning({ id: vaults.id });
+  return inserted.id;
 };
 
 export const fetchV1Vaults = async () => {
@@ -51,18 +82,6 @@ export const fetchV1Vaults = async () => {
 
   const client = createPublicClient({ chain: mainnet, transport: http(rpcUrl) });
   console.log(`Reading ${V1_VAULTS.length} V1 vaults on-chain...\n`);
-
-  // Read on-chain data for all vaults
-  interface V1Data {
-    address: `0x${string}`;
-    token: string;
-    tokenSymbol: string;
-    tokenDecimals: number;
-    name: string;
-    totalSupply: bigint;
-    pricePerFullShare: bigint;
-    decimals: number;
-  }
 
   const vaultData: V1Data[] = [];
   const tokenAddresses = new Set<string>();
@@ -101,7 +120,9 @@ export const fetchV1Vaults = async () => {
   console.log(`  Read ${vaultData.length}/${V1_VAULTS.length} vaults successfully`);
 
   // Fetch token prices from DefiLlama
-  const prices = await fetchTokenPrices([...tokenAddresses]);
+  const prices = await fetchCurrentPrices(
+    [...tokenAddresses].map((address) => ({ chainId: 1, address })),
+  );
   console.log(`  Got prices for ${prices.size}/${tokenAddresses.size} tokens\n`);
 
   let stored = 0;
@@ -115,13 +136,10 @@ export const fetchV1Vaults = async () => {
       // TVL = totalSupply * pricePerFullShare / 1e18 (in underlying tokens)
       const underlyingAmount =
         Number(v.totalSupply) * Number(v.pricePerFullShare) / 1e18 / 10 ** v.tokenDecimals;
-      let tokenPrice = prices.get(v.token.toLowerCase()) ?? 0;
 
       // Stablecoin Curve LP fallback: ~$1/token for pools composed of stablecoins
-      if (tokenPrice === 0) {
-        const stableLPSymbols = ["yDAI+yUSDC+yUSDT+yTUSD", "yDAI+yUSDC+yUSDT+yBUSD", "crvPlain3andSUSD", "dusd3CRV", "usdp3CRV", "musd3CRV", "ust3CRV", "gusd3CRV", "husd3CRV", "usdn3CRV", "rsv3CRV", "tusd3CRV", "busd3CRV", "pax3CRV"];
-        if (stableLPSymbols.includes(v.tokenSymbol)) tokenPrice = 1;
-      }
+      const tokenPrice = prices.get(v.token.toLowerCase())
+        || (STABLE_LP_SYMBOLS.includes(v.tokenSymbol) ? 1 : 0);
 
       const tvlUsd = underlyingAmount * tokenPrice;
 
@@ -130,37 +148,7 @@ export const fetchV1Vaults = async () => {
         where: and(eq(vaults.address, addr), eq(vaults.chainId, 1)),
       });
 
-      let vaultId: number;
-      if (existing) {
-        await db.update(vaults).set({
-          name: v.name,
-          category: "v1",
-          source: "onchain",
-          assetAddress: v.token,
-          assetSymbol: v.tokenSymbol,
-          assetDecimals: v.tokenDecimals,
-          isRetired: false,
-          updatedAt: now,
-        }).where(eq(vaults.id, existing.id));
-        vaultId = existing.id;
-      } else {
-        const [inserted] = await db.insert(vaults).values({
-          address: addr,
-          chainId: 1,
-          name: v.name,
-          v3: false,
-          yearn: true,
-          category: "v1",
-          source: "onchain",
-          assetAddress: v.token,
-          assetSymbol: v.tokenSymbol,
-          assetDecimals: v.tokenDecimals,
-          isRetired: false,
-          createdAt: now,
-          updatedAt: now,
-        }).returning({ id: vaults.id });
-        vaultId = inserted.id;
-      }
+      const vaultId = await upsertVault(existing, addr, v, now);
 
       // Insert snapshot
       const totalAssetsStr = (

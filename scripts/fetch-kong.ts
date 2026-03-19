@@ -3,7 +3,7 @@
  * Categories: v2 (apiVersion 0.4.x) and v3 (v3=true). Curation vaults are NOT in Kong.
  */
 import { db, vaults, vaultSnapshots, strategies, strategyDebts, feeConfigs } from "@yearn-tvl/db";
-import { KONG_API_URL, IGNORED_VAULTS, CHAIN_PREFIXES } from "@yearn-tvl/shared";
+import { KONG_API_URL, IGNORED_VAULTS, fetchCurrentPrices } from "@yearn-tvl/shared";
 import type { KongVault } from "@yearn-tvl/shared";
 import { eq, and } from "drizzle-orm";
 import { priceViaSugarOracle } from "./lib/velo-oracle.js";
@@ -187,40 +187,23 @@ const upsertFees = async (vaultId: number, kongVault: KongVault) => {
 const priceMissingTvl = async (zeroTvlVaults: { vaultId: number; kongVault: KongVault }[]) => {
   if (zeroTvlVaults.length === 0) return 0;
 
-  const tokens = zeroTvlVaults
-    .map((v) => {
-      const prefix = CHAIN_PREFIXES[v.kongVault.chainId];
-      if (!prefix || !v.kongVault.asset?.address) return null;
-      return { key: `${prefix}:${v.kongVault.asset.address}`, vault: v };
-    })
-    .filter(Boolean) as { key: string; vault: { vaultId: number; kongVault: KongVault } }[];
+  const priceable = zeroTvlVaults.filter((v) => v.kongVault.asset?.address);
+  if (priceable.length === 0) return 0;
 
-  if (tokens.length === 0) return 0;
-
-  const coinKeys = [...new Set(tokens.map((t) => t.key))].join(",");
-  let prices: Record<string, { price: number }> = {};
-
-  try {
-    const res = await fetch(`https://coins.llama.fi/prices/current/${coinKeys}`);
-    if (res.ok) {
-      const data = (await res.json()) as { coins: Record<string, { price: number }> };
-      prices = data.coins;
-    }
-  } catch {
-    console.warn("Failed to fetch fallback prices from DefiLlama");
-    return 0;
-  }
+  const prices = await fetchCurrentPrices(
+    priceable.map((v) => ({ chainId: v.kongVault.chainId, address: v.kongVault.asset!.address })),
+  );
 
   let fixed = 0;
-  for (const { key, vault } of tokens) {
-    const priceInfo = prices[key];
-    if (!priceInfo || priceInfo.price <= 0) continue;
+  for (const vault of priceable) {
+    const price = prices.get(vault.kongVault.asset!.address.toLowerCase());
+    if (!price || price <= 0) continue;
 
-    const decimals = vault.kongVault.asset.decimals;
+    const decimals = vault.kongVault.asset!.decimals;
     const totalAssets = BigInt(vault.kongVault.totalAssets || "0");
     if (totalAssets === 0n) continue;
 
-    const tvlUsd = Number(totalAssets) / 10 ** decimals * priceInfo.price;
+    const tvlUsd = Number(totalAssets) / 10 ** decimals * price;
     if (tvlUsd <= 0) continue;
 
     const latestSnapshot = await db.query.vaultSnapshots.findFirst({
@@ -305,21 +288,15 @@ export const fetchAndStoreKongData = async () => {
   const kongVaults = await fetchKongVaults();
   console.log(`Received ${kongVaults.length} vaults from Kong`);
 
-  let stored = 0;
-  let skipped = 0;
+  const activeVaults = kongVaults.filter((kv) => !isIgnored(kv.address, kv.chainId));
+  const skipped = kongVaults.length - activeVaults.length;
   const zeroTvlVaults: { vaultId: number; kongVault: KongVault }[] = [];
 
-  for (const kv of kongVaults) {
-    if (isIgnored(kv.address, kv.chainId)) {
-      skipped++;
-      continue;
-    }
-
+  for (const kv of activeVaults) {
     const vaultId = await upsertVault(kv);
     await upsertSnapshot(vaultId, kv);
     await upsertStrategiesAndDebts(vaultId, kv);
     await upsertFees(vaultId, kv);
-    stored++;
 
     const tvl = kv.tvl?.close ?? 0;
     const totalAssets = BigInt(kv.totalAssets || "0");
@@ -328,6 +305,7 @@ export const fetchAndStoreKongData = async () => {
     }
   }
 
+  const stored = activeVaults.length;
   console.log(`Stored ${stored} vaults, skipped ${skipped} ignored`);
 
   if (zeroTvlVaults.length > 0) {

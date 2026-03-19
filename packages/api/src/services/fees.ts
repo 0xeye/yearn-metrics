@@ -7,7 +7,7 @@
 import { db, vaults, vaultSnapshots, feeConfigs, strategyReports, assetPrices } from "@yearn-tvl/db";
 import { eq, and, desc, sql, gte, lte } from "drizzle-orm";
 import type { VaultCategory } from "@yearn-tvl/shared";
-import { CHAIN_NAMES, toMondayNoon, YEAR_SECONDS } from "@yearn-tvl/shared";
+import { CHAIN_NAMES, toMondayNoon, YEAR_SECONDS, groupBy } from "@yearn-tvl/shared";
 
 interface TimeWeightedMgmtFeeInput {
   totalAssetsRaw: string | null;
@@ -50,15 +50,14 @@ const computeTimeWeightedMgmtFee = (input: TimeWeightedMgmtFeeInput): number => 
 
   if (weeklyPrices.length < 2) return simpleFee();
 
-  let totalMgmtFee = 0;
-  for (let i = 0; i < weeklyPrices.length; i++) {
-    const weeklyTvl = totalAssetsNorm * weeklyPrices[i].price;
-    const segStart = Math.max(weeklyPrices[i].ts, firstTime);
+  const totalMgmtFee = weeklyPrices.reduce((sum, wp, i) => {
+    const weeklyTvl = totalAssetsNorm * wp.price;
+    const segStart = Math.max(wp.ts, firstTime);
     const segEnd = i < weeklyPrices.length - 1
       ? Math.min(weeklyPrices[i + 1].ts, lastTime)
       : lastTime;
-    totalMgmtFee += weeklyTvl * (mgmtRate / 10000) * (Math.max(0, segEnd - segStart) / YEAR_SECONDS);
-  }
+    return sum + weeklyTvl * (mgmtRate / 10000) * (Math.max(0, segEnd - segStart) / YEAR_SECONDS);
+  }, 0);
 
   return totalMgmtFee;
 };
@@ -69,14 +68,11 @@ const loadPricesByAsset = async (): Promise<Map<string, { ts: number; price: num
     .select({ chainId: assetPrices.chainId, address: assetPrices.address, priceUsd: assetPrices.priceUsd, timestamp: assetPrices.timestamp })
     .from(assetPrices);
 
+  const grouped = groupBy(rows, (r) => `${r.chainId}:${r.address}`);
   const map = new Map<string, { ts: number; price: number }[]>();
-  for (const r of rows) {
-    const key = `${r.chainId}:${r.address}`;
-    const arr = map.get(key) ?? [];
-    arr.push({ ts: r.timestamp, price: r.priceUsd });
-    map.set(key, arr);
+  for (const [key, entries] of grouped) {
+    map.set(key, entries.map((r) => ({ ts: r.timestamp, price: r.priceUsd })).sort((a, b) => a.ts - b.ts));
   }
-  for (const arr of map.values()) arr.sort((a, b) => a.ts - b.ts);
   return map;
 };
 
@@ -94,11 +90,7 @@ const loadLatestSnapshots = async (): Promise<Map<number, { tvlUsd: number; tota
       sql`${vaultSnapshots.id} IN (SELECT MAX(id) FROM ${vaultSnapshots} GROUP BY ${vaultSnapshots.vaultId})`,
     );
 
-  const map = new Map<number, { tvlUsd: number; totalAssets: string | null }>();
-  for (const r of rows) {
-    map.set(r.vaultId, { tvlUsd: r.tvlUsd || 0, totalAssets: r.totalAssets });
-  }
-  return map;
+  return new Map(rows.map((r) => [r.vaultId, { tvlUsd: r.tvlUsd || 0, totalAssets: r.totalAssets }]));
 };
 
 interface VaultFeeDetail {
