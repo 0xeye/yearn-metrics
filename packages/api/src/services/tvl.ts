@@ -4,31 +4,11 @@
  * Includes retired vault TVL in totals (matching DefiLlama behavior — DL counts
  * any vault with positive on-chain TVL regardless of retirement status).
  */
-import { db, vaults, vaultSnapshots, strategies, strategyDebts } from "@yearn-tvl/db";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { db, vaults, strategies, strategyDebts } from "@yearn-tvl/db";
+import { eq, and, desc } from "drizzle-orm";
 import type { TvlSummary, VaultTvl, OverlapDetail, VaultCategory } from "@yearn-tvl/shared";
 import { CHAIN_NAMES, STRATEGY_OVERLAP_REGISTRY, CROSS_CHAIN_OVERLAP_REGISTRY } from "@yearn-tvl/shared";
-
-/** Get the latest snapshot for each vault */
-const getLatestSnapshots = async () => {
-  const latestIds = db
-    .select({
-      vaultId: vaultSnapshots.vaultId,
-      maxId: sql<number>`MAX(${vaultSnapshots.id})`.as("max_id"),
-    })
-    .from(vaultSnapshots)
-    .groupBy(vaultSnapshots.vaultId)
-    .as("latest");
-
-  return db
-    .select({ vault: vaults, snapshot: vaultSnapshots })
-    .from(vaultSnapshots)
-    .innerJoin(latestIds, and(
-      eq(vaultSnapshots.vaultId, latestIds.vaultId),
-      eq(vaultSnapshots.id, latestIds.maxId),
-    ))
-    .innerJoin(vaults, eq(vaultSnapshots.vaultId, vaults.id));
-};
+import { getLatestSnapshots } from "./queries.js";
 
 /** Detect vault→vault overlap (auto + registry-based) */
 const computeOverlap = async (): Promise<OverlapDetail[]> => {

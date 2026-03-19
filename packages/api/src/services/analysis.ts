@@ -6,6 +6,7 @@ import { db, vaults, vaultSnapshots, feeConfigs, strategyReports, depositors } f
 import { eq, and, desc, sql, gte } from "drizzle-orm";
 import type { VaultCategory } from "@yearn-tvl/shared";
 import { CHAIN_NAMES } from "@yearn-tvl/shared";
+import { latestSnapshotIds } from "./queries.js";
 
 type Classification = "dead" | "low-yield" | "healthy";
 
@@ -75,14 +76,7 @@ export const getDeadTvlAnalysis = async (): Promise<DeadTvlResult> => {
   const cutoff = now - 365 * 24 * 3600;
 
   // Get all active (non-retired) vaults with their latest snapshot
-  const latestIds = db
-    .select({
-      vaultId: vaultSnapshots.vaultId,
-      maxId: sql<number>`MAX(${vaultSnapshots.id})`.as("max_id"),
-    })
-    .from(vaultSnapshots)
-    .groupBy(vaultSnapshots.vaultId)
-    .as("latest");
+  const latestIds = latestSnapshotIds();
 
   const activeVaults = await db
     .select({
@@ -169,14 +163,7 @@ export const getDeadTvlAnalysis = async (): Promise<DeadTvlResult> => {
 
 /** Find retired vaults that still hold TVL > 0 */
 export const getRetiredTvlAnalysis = async (): Promise<RetiredVault[]> => {
-  const latestIds = db
-    .select({
-      vaultId: vaultSnapshots.vaultId,
-      maxId: sql<number>`MAX(${vaultSnapshots.id})`.as("max_id"),
-    })
-    .from(vaultSnapshots)
-    .groupBy(vaultSnapshots.vaultId)
-    .as("latest");
+  const latestIds = latestSnapshotIds();
 
   const rows = await db
     .select({
@@ -220,14 +207,7 @@ export const getStickyTvlAnalysis = async (): Promise<StickyTvlVault[]> => {
 
   const statsMap = new Map(vaultDepositorStats.map((s) => [s.vaultId, s]));
 
-  const latestIds = db
-    .select({
-      vaultId: vaultSnapshots.vaultId,
-      maxId: sql<number>`MAX(${vaultSnapshots.id})`.as("max_id"),
-    })
-    .from(vaultSnapshots)
-    .groupBy(vaultSnapshots.vaultId)
-    .as("latest");
+  const latestIds = latestSnapshotIds();
 
   const vaultRows = await db
     .select({

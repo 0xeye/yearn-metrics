@@ -3,10 +3,11 @@
  * Computes per-vault fee yield, fee capture rate, trends, and strategic quadrant classification.
  * Fee yield = annualized fee revenue / average TVL (like APY for the protocol).
  */
-import { db, vaults, vaultSnapshots, feeConfigs, strategyReports } from "@yearn-tvl/db";
-import { eq, and, desc, sql, gte } from "drizzle-orm";
+import { db, vaults, feeConfigs, strategyReports } from "@yearn-tvl/db";
+import { eq, and, sql, gte } from "drizzle-orm";
 import type { VaultCategory } from "@yearn-tvl/shared";
-import { CHAIN_NAMES } from "@yearn-tvl/shared";
+import { CHAIN_NAMES, toMap, reduceBy } from "@yearn-tvl/shared";
+import { getLatestSnapshots } from "./queries.js";
 
 type PricingConfidence = "high" | "medium" | "low";
 type Trend = "improving" | "declining" | "stable" | "insufficient_data";
@@ -93,42 +94,6 @@ interface TrendResult {
   period: string;
 }
 
-/** Get latest snapshots — reusable across functions */
-const getLatestSnapshots = () => {
-  const latestIds = db
-    .select({
-      vaultId: vaultSnapshots.vaultId,
-      maxId: sql<number>`MAX(${vaultSnapshots.id})`.as("max_id"),
-    })
-    .from(vaultSnapshots)
-    .groupBy(vaultSnapshots.vaultId)
-    .as("latest");
-
-  return db
-    .select({ vault: vaults, snapshot: vaultSnapshots })
-    .from(vaultSnapshots)
-    .innerJoin(latestIds, and(
-      eq(vaultSnapshots.vaultId, latestIds.vaultId),
-      eq(vaultSnapshots.id, latestIds.maxId),
-    ))
-    .innerJoin(vaults, eq(vaultSnapshots.vaultId, vaults.id));
-};
-
-/** Build a Map from an array using a key extractor */
-const toMap = <T, K, V>(items: T[], key: (t: T) => K, value: (t: T) => V): Map<K, V> =>
-  new Map(items.map((t) => [key(t), value(t)]));
-
-/** Group an array by key, accumulating values with a reducer */
-const groupBy = <T, V>(
-  items: T[],
-  key: (t: T) => string,
-  init: () => V,
-  accumulate: (acc: V, t: T) => V,
-): Record<string, V> =>
-  items.reduce((acc, t) => {
-    const k = key(t);
-    return { ...acc, [k]: accumulate(acc[k] ?? init(), t) };
-  }, {} as Record<string, V>);
 
 /** Determine pricing confidence from the mix of pricing sources in a vault's reports.
  * Reports without an explicit pricingSource came from Kong API (gainUsd at report time),
@@ -379,7 +344,7 @@ export const getProfitability = async (): Promise<ProfitabilitySummary> => {
   };
 
   // Aggregate by chain
-  const chainAgg = groupBy(
+  const chainAgg = reduceBy(
     classified,
     (v) => CHAIN_NAMES[v.chainId] || `Chain ${v.chainId}`,
     () => ({ chainId: 0, tvl: 0, fees: 0, vaultCount: 0 }),
@@ -390,7 +355,7 @@ export const getProfitability = async (): Promise<ProfitabilitySummary> => {
     .sort((a, b) => b.fees - a.fees);
 
   // Aggregate by category
-  const catAgg = groupBy(
+  const catAgg = reduceBy(
     classified,
     (v) => v.category,
     () => ({ tvl: 0, fees: 0, vaultCount: 0 }),
