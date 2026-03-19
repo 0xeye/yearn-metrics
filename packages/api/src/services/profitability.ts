@@ -8,6 +8,7 @@ import { eq, and, sql, gte } from "drizzle-orm";
 import type { VaultCategory } from "@yearn-tvl/shared";
 import { CHAIN_NAMES, toMap, reduceBy } from "@yearn-tvl/shared";
 import { getLatestSnapshots, latestFeeConfigIds, isAnalysisEligible } from "./queries.js";
+import { computeOverlap } from "./tvl.js";
 
 type PricingConfidence = "high" | "medium" | "low";
 type Trend = "improving" | "declining" | "stable" | "insufficient_data";
@@ -145,6 +146,14 @@ export const getProfitability = async (): Promise<ProfitabilitySummary> => {
 
   const snapshots = await getLatestSnapshots();
 
+  // Compute overlap deductions per target vault
+  const overlaps = await computeOverlap();
+  const overlapByTarget = new Map<string, number>();
+  for (const o of overlaps) {
+    const key = `${o.chainId}:${o.targetVault.toLowerCase()}`;
+    overlapByTarget.set(key, (overlapByTarget.get(key) || 0) + o.overlapUsd);
+  }
+
   // Build fee rate lookup (latest per vault)
   const latestFees = latestFeeConfigIds();
   const feeRates = await db
@@ -246,7 +255,10 @@ export const getProfitability = async (): Promise<ProfitabilitySummary> => {
   const vaultResults = snapshots
     .filter(({ vault, snapshot }) => isAnalysisEligible(vault, snapshot.tvlUsd ?? 0))
     .map(({ vault, snapshot }) => {
-      const tvlUsd = snapshot.tvlUsd ?? 0;
+      const rawTvl = snapshot.tvlUsd ?? 0;
+      // Deduct any overlap where this vault is a target (receives deposits from another vault's strategy)
+      const overlapDeduction = overlapByTarget.get(`${vault.chainId}:${vault.address.toLowerCase()}`) || 0;
+      const tvlUsd = Math.max(0, rawTvl - overlapDeduction);
       const rates = rateMap.get(vault.id) || { performanceFee: 0, managementFee: 0 };
       const reports = reportMap.get(vault.id);
       const totalGain = reports?.totalGain || 0;
@@ -255,7 +267,7 @@ export const getProfitability = async (): Promise<ProfitabilitySummary> => {
       // Performance fee revenue
       const perfRevenue = totalGain * (rates.performanceFee / 10000);
 
-      // Management fee revenue (annualized from TVL)
+      // Management fee revenue (annualized from adjusted TVL)
       const mgmtRevenue = (() => {
         if (rates.managementFee <= 0 || tvlUsd <= 0 || !reports) return 0;
         const minTime = reports.minBlockTime || 0;

@@ -8,7 +8,7 @@ const ComparisonPanel = lazy(() => import("./panels/ComparisonPanel").then((m) =
 const FeesPanel = lazy(() => import("./panels/FeesPanel").then((m) => ({ default: m.FeesPanel })));
 const ProfitabilityPanel = lazy(() => import("./panels/ProfitabilityPanel").then((m) => ({ default: m.ProfitabilityPanel })));
 const AnalysisPanel = lazy(() => import("./panels/AnalysisPanel").then((m) => ({ default: m.AnalysisPanel })));
-const VaultsPanel = lazy(() => import("./panels/VaultsPanel").then((m) => ({ default: m.VaultsPanel })));
+const AuditPanel = lazy(() => import("./panels/AuditPanel").then((m) => ({ default: m.AuditPanel })));
 
 const TABS = [
   { key: "Overview", icon: "\u25A3", label: "Overview" },
@@ -16,7 +16,7 @@ const TABS = [
   { key: "Fees", icon: "\u2234", label: "Fees" },
   { key: "Profitability", icon: "\u2237", label: "Profitability" },
   { key: "Analysis", icon: "\u2609", label: "Analysis" },
-  { key: "Vaults", icon: "\u2395", label: "Vaults" },
+  { key: "Vaults", icon: "\u2263", label: "Vaults" },
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
 
@@ -155,7 +155,7 @@ export const App = () => {
                 {tab === "Fees" && <FeesPanel />}
                 {tab === "Profitability" && <ProfitabilityPanel />}
                 {tab === "Analysis" && <AnalysisPanel />}
-                {tab === "Vaults" && <VaultsPanel />}
+                {tab === "Vaults" && <AuditPanel />}
               </div>
             </Suspense>
           </main>

@@ -39,6 +39,7 @@ export interface OverlapDetail {
   sourceVault: string;
   targetVault: string;
   strategyAddress: string;
+  chainId: number;
   overlapUsd: number;
   sourceCategory: VaultCategory;
   targetCategory: VaultCategory;

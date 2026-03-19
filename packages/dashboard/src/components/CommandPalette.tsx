@@ -20,7 +20,7 @@ const NAV_ITEMS: PaletteItem[] = [
   { id: "Fees", label: "Fees", type: "navigation", icon: "\u{1F4B0}", hint: "Fee revenue" },
   { id: "Profitability", label: "Profitability", type: "navigation", icon: "\u{1F4C8}", hint: "Vault profitability" },
   { id: "Analysis", label: "Analysis", type: "navigation", icon: "\u{1F50D}", hint: "Dead TVL & depositors" },
-  { id: "Vaults", label: "Vaults", type: "navigation", icon: "\u{1F3E6}", hint: "All vaults" },
+  { id: "Vaults", label: "Vaults", type: "navigation", icon: "\u{1F3E6}", hint: "Vault tree & overlaps" },
 ];
 
 const ACTION_ITEMS: PaletteItem[] = [

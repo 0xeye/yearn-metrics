@@ -11,7 +11,7 @@ import { CHAIN_NAMES, STRATEGY_OVERLAP_REGISTRY, CROSS_CHAIN_OVERLAP_REGISTRY, g
 import { getLatestSnapshots } from "./queries.js";
 
 /** Detect vault→vault overlap (auto + registry-based) */
-const computeOverlap = async (): Promise<OverlapDetail[]> => {
+export const computeOverlap = async (): Promise<OverlapDetail[]> => {
   const allVaults = await db.select({
     id: vaults.id,
     address: vaults.address,
@@ -71,6 +71,7 @@ const computeOverlap = async (): Promise<OverlapDetail[]> => {
         sourceVault: vault.address,
         targetVault: targetVault.address,
         strategyAddress: strat.address,
+        chainId: vault.chainId,
         overlapUsd: debtUsd,
         sourceCategory: vault.category as VaultCategory,
         targetCategory: targetVault.category as VaultCategory,
@@ -101,6 +102,7 @@ const computeOverlap = async (): Promise<OverlapDetail[]> => {
       sourceVault: sourceVault.address,
       targetVault: targetVault.address,
       strategyAddress: strat.address,
+      chainId: entry.chainId,
       overlapUsd: debtUsd,
       sourceCategory: sourceVault.category as VaultCategory,
       targetCategory: targetVault.category as VaultCategory,
