@@ -35,11 +35,16 @@ bun run fetch:depositors # Depositor data from Kong transfers (Ethereum only)
 bun run scripts/fetch-v2-fees.ts    # Read actual V2 fee rates on-chain
 bun run scripts/reprice-reports.ts  # Reprice reports using cached prices + snapshot fallback
 
-# Analysis tools
-bun run audit                              # Interactive TUI: Chain → Category → Vault → Strategy
-bun run audit -- --min-tvl=1000000         # Filter by min TVL
-bun run audit -- --json                    # JSON output
-bun run scripts/detect-overlaps.ts         # Find strategy→vault overlaps (on-chain scan)
+# Analysis CLI (JSON default, --table for human-readable)
+bun run audit                              # TVL summary (JSON)
+bun run audit tvl --table                  # TVL table
+bun run audit overlaps                     # Strategy→vault overlaps
+bun run audit vault 0x...                  # Single vault detail
+bun run audit fees --table                 # Fee summary
+bun run audit depositors                   # Depositor concentration
+bun run audit -- --chain=1 --min-tvl=1000000  # Filter flags
+bun run audit help                         # Show all subcommands
+bun run scripts/detect-overlaps.ts         # Find overlaps on-chain
 
 # Database & types
 bun run db:migrate       # Apply migrations
