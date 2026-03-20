@@ -342,25 +342,27 @@ export function FeesPanel() {
         </div>
       </div>
 
-      {/* ---- Fee Stacking Analysis ---- */}
-      {feeStack && feeStack.chains.length > 0 && (
+      {/* ---- Fee Analysis ---- */}
+      {feeStack && feeStack.chains.length > 0 && (() => {
+        const maxCap = Math.max(...feeStack.chains.map((c) => c.root.capitalUsd), 1);
+        return (
         <div className="card">
-          <h2>Fee Stacking</h2>
+          <h2>Fee Analysis</h2>
           <div className="metric-grid" style={{ marginBottom: "1rem" }}>
             <div className="metric">
               <div className="label">Max Depth</div>
               <div className="value">{feeStack.maxDepth}</div>
             </div>
             <div className="metric">
-              <div className="label">Max Effective Perf Fee</div>
+              <div className="label">Max Effective Fee</div>
               <div className="value text-yellow">{bpsPct(feeStack.maxEffectivePerfFee)}</div>
             </div>
             <div className="metric">
-              <div className="label">Avg Effective Perf Fee</div>
+              <div className="label">Avg Effective Fee</div>
               <div className="value">{bpsPct(feeStack.avgEffectivePerfFee)}</div>
             </div>
             <div className="metric">
-              <div className="label">Stacked Chains</div>
+              <div className="label">Vaults with Stacking</div>
               <div className="value">{feeStack.chains.length}</div>
             </div>
           </div>
@@ -370,8 +372,7 @@ export function FeesPanel() {
                 <tr>
                   <th>Vault</th>
                   <th className="text-right">Perf Fee</th>
-                  <th className="text-right">Mgmt Fee</th>
-                  <th className="text-right">Capital</th>
+                  <th className="text-right">Fees Captured</th>
                   <th className="text-right">Effective</th>
                 </tr>
               </thead>
@@ -379,9 +380,10 @@ export function FeesPanel() {
                 {feeStack.chains.map((chain, idx) => {
                   const isOpen = expandedStack === idx;
                   const rows = flattenTree(chain.root, 0, true);
+                  const feeCaptured = chain.root.capitalUsd * (chain.effectivePerfFee / 10000);
+                  const barPct = maxCap > 0 ? (chain.root.capitalUsd / maxCap) * 100 : 0;
                   return (
                     <Fragment key={`stack-${idx}`}>
-                      {/* Collapsed: summary row */}
                       <tr
                         onClick={() => setExpandedStack(isOpen ? null : idx)}
                         style={{ cursor: "pointer" }}
@@ -398,8 +400,17 @@ export function FeesPanel() {
                           </span>
                         </td>
                         <td className="text-right">{bpsPct(chain.root.perfFee)}</td>
-                        <td className="text-right">{bpsPct(chain.root.mgmtFee)}</td>
-                        <td className="text-right">{fmt(chain.root.capitalUsd)}</td>
+                        <td className="text-right">
+                          <div className="inline-bar">
+                            <span className="text-green">{fmt(feeCaptured)}</span>
+                            <div className="inline-bar-track">
+                              <div
+                                className="inline-bar-fill fill-green"
+                                style={{ width: `${barPct}%` }}
+                              />
+                            </div>
+                          </div>
+                        </td>
                         <td className="text-right">
                           <span className="text-yellow" style={{ fontWeight: 600 }}>{bpsPct(chain.effectivePerfFee)}</span>
                           <span className="text-dim" style={{ fontSize: "0.7rem", marginLeft: 4 }}>
@@ -407,12 +418,12 @@ export function FeesPanel() {
                           </span>
                         </td>
                       </tr>
-                      {/* Expanded: tree rows */}
                       {isOpen && rows.map(({ node, depth, isLast }, ri) => {
                         const paddingLeft = 1.0 + depth * 1.6;
                         const isRoot = depth === 0;
                         const isLeafStrategy = node.children.length === 0 && node.perfFee === 0 && !isRoot;
                         const rowOpacity = isLeafStrategy ? 0.55 : 1;
+                        const hopFee = node.capitalUsd * (node.perfFee / 10000);
                         return (
                           <tr
                             key={`stack-${idx}-${ri}`}
@@ -439,10 +450,9 @@ export function FeesPanel() {
                             <td className="text-right" style={{ color: node.perfFee > 0 ? "var(--text)" : "var(--text-3)" }}>
                               {bpsPct(node.perfFee)}
                             </td>
-                            <td className="text-right" style={{ color: node.mgmtFee > 0 ? "var(--text)" : "var(--text-3)" }}>
-                              {bpsPct(node.mgmtFee)}
+                            <td className="text-right" style={{ color: hopFee > 0 ? "var(--text-2)" : "var(--text-3)" }}>
+                              {hopFee > 0 ? fmt(hopFee) : fmt(node.capitalUsd)}
                             </td>
-                            <td className="text-right text-dim">{fmt(node.capitalUsd)}</td>
                             <td className="text-right">
                               {isRoot ? (
                                 <span className="text-dim" style={{ fontSize: "0.7rem" }}>root</span>
@@ -450,14 +460,13 @@ export function FeesPanel() {
                                 <span className="text-dim" style={{ fontSize: "0.65rem" }}>strategy</span>
                               ) : (
                                 <span className="text-dim" style={{ fontSize: "0.7rem" }}>
-                                  +{bpsPct(node.perfFee)} perf
+                                  +{bpsPct(node.perfFee)}
                                 </span>
                               )}
                             </td>
                           </tr>
                         );
                       })}
-                      {/* Effective total row */}
                       {isOpen && (
                         <tr style={{ background: "rgba(46, 230, 182, 0.06)", borderTop: "1px solid var(--border)" }}>
                           <td style={{ paddingLeft: "1rem" }}>
@@ -468,10 +477,11 @@ export function FeesPanel() {
                           <td className="text-right">
                             <span className="text-yellow" style={{ fontWeight: 600 }}>{bpsPct(chain.effectivePerfFee)}</span>
                           </td>
-                          <td className="text-right" style={{ fontWeight: 600 }}>{bpsPct(chain.effectiveMgmtFee)}</td>
-                          <td />
+                          <td className="text-right text-green" style={{ fontWeight: 600 }}>
+                            {fmt(feeCaptured)}
+                          </td>
                           <td className="text-right">
-                            <span className="text-dim" style={{ fontSize: "0.7rem" }}>compound</span>
+                            <span className="text-dim" style={{ fontSize: "0.7rem" }}>weighted</span>
                           </td>
                         </tr>
                       )}
@@ -482,7 +492,8 @@ export function FeesPanel() {
             </table>
           </div>
         </div>
-      )}
+        );
+      })()}
     </>
   );
 }
