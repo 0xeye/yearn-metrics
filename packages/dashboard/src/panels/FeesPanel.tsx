@@ -65,10 +65,12 @@ interface FeeStackSummary {
 }
 
 /** Flatten a tree node into table rows with depth info */
+/** Flatten tree to rows, filtering out dust (<$100) children */
 function flattenTree(node: FeeStackNode, depth: number, isLast: boolean): Array<{ node: FeeStackNode; depth: number; isLast: boolean }> {
   const rows: Array<{ node: FeeStackNode; depth: number; isLast: boolean }> = [{ node, depth, isLast }];
-  node.children.forEach((child, i) => {
-    rows.push(...flattenTree(child, depth + 1, i === node.children.length - 1));
+  const visibleChildren = depth === 0 ? node.children : node.children.filter((c) => c.capitalUsd >= 100);
+  visibleChildren.forEach((child, i) => {
+    rows.push(...flattenTree(child, depth + 1, i === visibleChildren.length - 1));
   });
   return rows;
 }
@@ -409,10 +411,12 @@ export function FeesPanel() {
                       {isOpen && rows.map(({ node, depth, isLast }, ri) => {
                         const paddingLeft = 1.0 + depth * 1.6;
                         const isRoot = depth === 0;
+                        const isLeafStrategy = node.children.length === 0 && node.perfFee === 0 && !isRoot;
+                        const rowOpacity = isLeafStrategy ? 0.55 : 1;
                         return (
                           <tr
                             key={`stack-${idx}-${ri}`}
-                            style={{ background: `rgba(46, 230, 182, ${0.015 + depth * 0.015})` }}
+                            style={{ background: `rgba(46, 230, 182, ${0.015 + depth * 0.015})`, opacity: rowOpacity }}
                           >
                             <td style={{ paddingLeft: `${paddingLeft}rem` }}>
                               <span className="text-dim" style={{ marginRight: 6, fontSize: "0.75rem" }}>
@@ -442,6 +446,8 @@ export function FeesPanel() {
                             <td className="text-right">
                               {isRoot ? (
                                 <span className="text-dim" style={{ fontSize: "0.7rem" }}>root</span>
+                              ) : isLeafStrategy ? (
+                                <span className="text-dim" style={{ fontSize: "0.65rem" }}>strategy</span>
                               ) : (
                                 <span className="text-dim" style={{ fontSize: "0.7rem" }}>
                                   +{bpsPct(node.perfFee)} perf
