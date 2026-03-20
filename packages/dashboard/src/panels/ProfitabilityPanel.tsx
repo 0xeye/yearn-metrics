@@ -272,8 +272,8 @@ export function ProfitabilityPanel() {
                 type="number"
                 dataKey="logTvl"
                 name="TVL"
-                domain={["auto", "auto"]}
-                tickFormatter={(v) => fmt(Math.pow(10, v), 0)}
+                domain={["auto", 9]}
+                tickFormatter={(v: number) => fmt(Math.pow(10, v), 0)}
                 tick={{ fill: "#5e6673", fontSize: 11 }}
                 label={{ value: "TVL (log scale)", position: "bottom", fill: "#5e6673", fontSize: 11, offset: 6 }}
                 stroke="#1f2637"
