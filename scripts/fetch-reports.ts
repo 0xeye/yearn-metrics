@@ -5,21 +5,11 @@
  * using the vault's asset token price (TVL / totalAssets).
  */
 import { db, vaults, vaultSnapshots, strategyReports } from "@yearn-tvl/db";
-import { KONG_API_URL } from "@yearn-tvl/shared";
+import { KONG_API_URL, KongReportRESTSchema, validateArray } from "@yearn-tvl/shared";
+import type { KongReportREST } from "@yearn-tvl/shared";
 import { eq, desc } from "drizzle-orm";
 
-interface KongVaultReport {
-  strategy: string;
-  gain: string | null;
-  gainUsd: number | null;
-  loss: string | null;
-  lossUsd: number | null;
-  totalGainUsd: number | null;
-  totalLossUsd: number | null;
-  blockTime: string;
-  blockNumber: number;
-  transactionHash: string;
-}
+type KongVaultReport = KongReportREST;
 
 // Cap per-report gainUsd — Kong occasionally returns corrupted values (e.g. OHM-FRAXBP $4T)
 const MAX_GAIN_PER_REPORT = 500_000;
@@ -41,22 +31,45 @@ const REPORTS_QUERY = `
   }
 `;
 
-const fetchVaultReports = async (chainId: number, address: string): Promise<KongVaultReport[]> => {
-  const res = await fetch(KONG_API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      query: REPORTS_QUERY,
-      variables: { chainId, address },
-    }),
-  });
+const MAX_RETRIES = 3;
+const INITIAL_BACKOFF_MS = 1000;
 
-  if (!res.ok) throw new Error(`Kong API error: ${res.status}`);
-  const json = (await res.json()) as { data?: { vaultReports: KongVaultReport[] }; errors?: Array<{ message: string }> };
-  if (json.errors?.length) {
-    console.warn(`  Kong GraphQL errors for ${address}: ${json.errors[0].message}`);
+const fetchVaultReports = async (chainId: number, address: string): Promise<KongVaultReport[]> => {
+  for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
+    try {
+      const res = await fetch(KONG_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: REPORTS_QUERY,
+          variables: { chainId, address },
+        }),
+      });
+
+      if (res.status === 429 || (res.status >= 500 && attempt <= MAX_RETRIES)) {
+        const backoff = INITIAL_BACKOFF_MS * 2 ** (attempt - 1);
+        console.warn(`  ${res.status} for ${address.slice(0, 10)}, retrying in ${backoff}ms`);
+        await new Promise((r) => setTimeout(r, backoff));
+        continue;
+      }
+
+      if (!res.ok) throw new Error(`Kong API error: ${res.status}`);
+      const json = (await res.json()) as { data?: { vaultReports: unknown[] }; errors?: Array<{ message: string }> };
+      if (json.errors?.length) {
+        console.warn(`  Kong GraphQL errors for ${address}: ${json.errors[0].message}`);
+      }
+      const raw = json.data?.vaultReports || [];
+      return validateArray(raw, KongReportRESTSchema, "KongReport");
+    } catch (err) {
+      if (attempt <= MAX_RETRIES) {
+        const backoff = INITIAL_BACKOFF_MS * 2 ** (attempt - 1);
+        await new Promise((r) => setTimeout(r, backoff));
+        continue;
+      }
+      throw err;
+    }
   }
-  return json.data?.vaultReports || [];
+  return [];
 };
 
 const getActiveVaults = async () => {
