@@ -1,6 +1,6 @@
 import { Fragment, useState, useContext, useMemo } from "react";
 import { DashboardContext } from "../App";
-import { useFetch, fmt, useSort, CHAIN_NAMES, CHART_COLORS, SkeletonCards, SkeletonChart, bpsPct } from "../hooks";
+import { useFetch, fmt, useSort, CHAIN_NAMES, CHAIN_SHORT, CHAIN_COLORS, CHART_COLORS, SkeletonCards, SkeletonChart, bpsPct } from "../hooks";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Cell,
@@ -338,8 +338,17 @@ export function FeesPanel() {
                           <span style={{ fontWeight: 600 }}>
                             {chain.root.vault.name?.slice(0, 30) || chain.root.vault.address.slice(0, 10)}
                           </span>
-                          <span className="text-dim" style={{ marginLeft: 6, fontSize: "0.7rem" }}>
-                            {CHAIN_NAMES[chain.root.vault.chainId] || chain.root.vault.chainId}
+                          <span style={{
+                            marginLeft: 6,
+                            fontSize: "0.6rem",
+                            fontWeight: 600,
+                            padding: "1px 5px",
+                            borderRadius: 3,
+                            background: `${CHAIN_COLORS[chain.root.vault.chainId] || "#5e6673"}20`,
+                            color: CHAIN_COLORS[chain.root.vault.chainId] || "#5e6673",
+                            letterSpacing: "0.03em",
+                          }}>
+                            {CHAIN_SHORT[chain.root.vault.chainId] || chain.root.vault.chainId}
                           </span>
                         </td>
                         <td className="text-right">{bpsPct(chain.root.perfFee)}</td>
@@ -385,8 +394,16 @@ export function FeesPanel() {
                                 {node.vault.name?.slice(0, 28) || node.vault.address.slice(0, 10)}
                               </span>
                               {!isRoot && node.vault.chainId !== chain.root.vault.chainId && (
-                                <span className="text-dim" style={{ fontSize: "0.65rem", marginLeft: 4 }}>
-                                  ({CHAIN_NAMES[node.vault.chainId] || node.vault.chainId})
+                                <span style={{
+                                  marginLeft: 4,
+                                  fontSize: "0.55rem",
+                                  fontWeight: 600,
+                                  padding: "1px 4px",
+                                  borderRadius: 3,
+                                  background: `${CHAIN_COLORS[node.vault.chainId] || "#5e6673"}20`,
+                                  color: CHAIN_COLORS[node.vault.chainId] || "#5e6673",
+                                }}>
+                                  {CHAIN_SHORT[node.vault.chainId] || node.vault.chainId}
                                 </span>
                               )}
                             </td>

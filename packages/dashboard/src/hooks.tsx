@@ -116,6 +116,20 @@ export const CHAIN_SHORT: Record<number, string> = {
   8453: "BASE", 100: "GNO", 747474: "KAT", 999: "HL", 80094: "BERA", 146: "SONIC",
 };
 
+export const CHAIN_COLORS: Record<number, string> = {
+  1: "#627eea",    // Ethereum blue
+  10: "#ff0420",   // Optimism red
+  137: "#8247e5",  // Polygon purple
+  250: "#1969ff",  // Fantom blue
+  42161: "#28a0f0", // Arbitrum blue
+  8453: "#0052ff",  // Base blue
+  100: "#04795b",   // Gnosis green
+  747474: "#f5a623", // Katana gold
+  999: "#50e3c2",   // Hyperliquid teal
+  80094: "#d4a574",  // Berachain brown
+  146: "#5b21b6",   // Sonic purple
+};
+
 export const EXPLORER_URLS: Record<number, string> = {
   1: "https://etherscan.io/address",
   10: "https://optimistic.etherscan.io/address",
