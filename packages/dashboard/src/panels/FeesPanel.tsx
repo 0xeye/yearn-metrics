@@ -1,9 +1,9 @@
 import { Fragment, useState, useContext, useMemo } from "react";
 import { DashboardContext } from "../App";
-import { useFetch, fmt, useSort, CHAIN_NAMES, CHAIN_SHORT, CHAIN_COLORS, CHART_COLORS, SkeletonCards, SkeletonChart, bpsPct } from "../hooks";
+import { useFetch, fmt, useSort, CHAIN_NAMES, CHAIN_SHORT, CHAIN_COLORS, SkeletonCards, SkeletonChart, bpsPct } from "../hooks";
 import {
-  AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  CartesianGrid, Cell,
+  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  CartesianGrid,
 } from "recharts";
 
 interface FeeSummary {
@@ -110,17 +110,6 @@ export function FeesPanel() {
     const sinceDate = new Date(sinceTs * 1000);
     return history.buckets.filter((b) => new Date(b.period + "-01") >= sinceDate);
   }, [history, sinceTs]);
-
-  // All hooks must be called unconditionally (before any early returns)
-  const chainRows = useMemo(
-    () =>
-      summary
-        ? Object.entries(summary.byChain)
-            .map(([chain, d]) => ({ chain, label: CHAIN_NAMES[Number(chain)] || chain, feeRevenue: d.feeRevenue, gains: d.gains, vaultCount: d.vaultCount }))
-            .sort((a, b) => b.feeRevenue - a.feeRevenue)
-        : [],
-    [summary],
-  );
 
   const sortedStacks = useMemo(() => {
     if (!feeStack) return [];
@@ -243,44 +232,6 @@ export function FeesPanel() {
                 name="performanceFeeRevenue"
               />
             </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* ---- Fee Revenue by Chain (Horizontal Bar) ---- */}
-      <div className="card">
-        <h2>Fee Revenue by Chain</h2>
-        <div className="chart-container" style={{ height: 280 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart
-              data={chainRows}
-              layout="vertical"
-              margin={{ top: 4, right: 16, bottom: 4, left: 8 }}
-            >
-              <CartesianGrid stroke="#1f2637" strokeDasharray="3 3" horizontal={false} />
-              <XAxis
-                type="number"
-                tick={{ fill: "#5e6673", fontSize: 11 }}
-                tickFormatter={(v: number) => fmt(v, 0)}
-              />
-              <YAxis
-                type="category"
-                dataKey="label"
-                tick={{ fill: "#848e9c", fontSize: 11 }}
-                width={80}
-              />
-              <Tooltip
-                contentStyle={{ background: "#151a23", border: "1px solid #1f2637", borderRadius: 8 }}
-                labelStyle={{ color: "#eaecef" }}
-                formatter={(value: number) => [fmt(value, 2), "Fee Revenue"]}
-                cursor={{ fill: "rgba(46, 230, 182, 0.06)" }}
-              />
-              <Bar dataKey="feeRevenue" radius={[0, 4, 4, 0]} barSize={18}>
-                {chainRows.map((_, idx) => (
-                  <Cell key={idx} fill={CHART_COLORS[idx % CHART_COLORS.length]} />
-                ))}
-              </Bar>
-            </BarChart>
           </ResponsiveContainer>
         </div>
       </div>
