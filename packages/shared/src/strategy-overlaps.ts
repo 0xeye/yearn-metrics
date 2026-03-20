@@ -112,4 +112,10 @@ export const STRATEGY_OVERLAP_REGISTRY: StrategyOverlap[] = [
     targetVaultAddress: "0xc9f01b5c6048B064E6d925d1c2d7206d4fEeF8a3",
     label: "unknown → Spark USDS Compounder",
   },
+  {
+    strategyAddress: "0x6164217CAa4Ff58fb722D726391875aC0C5Fb541",
+    chainId: 1,
+    targetVaultAddress: "0x182863131F9a4630fF9E27830d945B1413e347E8",
+    label: "DAI To Yearn Term USDS → USDS-1 yVault",
+  },
 ];

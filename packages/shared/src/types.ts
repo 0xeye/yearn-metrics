@@ -70,21 +70,20 @@ export interface DefillamaComparison {
   }>;
 }
 
-/** Fee stacking analysis types */
-export interface FeeStackHop {
+/** Fee stacking analysis types — tree structure for vault→vault fee chains */
+export interface FeeStackNode {
   vault: { address: string; chainId: number; name: string | null };
   perfFee: number;      // bps
   mgmtFee: number;      // bps
   capitalUsd: number;   // debtUsd flowing into this vault
+  children: FeeStackNode[];  // downstream vaults this vault deposits into
 }
 
 export interface FeeStackChain {
-  rootVault: { address: string; chainId: number; name: string | null };
-  hops: FeeStackHop[];
-  depth: number;
-  effectivePerfFee: number;   // compound bps
-  effectiveMgmtFee: number;   // additive bps
-  totalYearnCapture: number;  // estimated USD
+  root: FeeStackNode;
+  maxDepth: number;
+  effectivePerfFee: number;   // compound bps across deepest path
+  effectiveMgmtFee: number;   // additive bps across deepest path
 }
 
 export interface FeeStackSummary {

@@ -41,20 +41,19 @@ interface VaultFee {
   managementFee: number;
 }
 
-interface FeeStackHop {
+interface FeeStackNode {
   vault: { address: string; chainId: number; name: string | null };
   perfFee: number;
   mgmtFee: number;
   capitalUsd: number;
+  children: FeeStackNode[];
 }
 
 interface FeeStackChain {
-  rootVault: { address: string; chainId: number; name: string | null };
-  hops: FeeStackHop[];
-  depth: number;
+  root: FeeStackNode;
+  maxDepth: number;
   effectivePerfFee: number;
   effectiveMgmtFee: number;
-  totalYearnCapture: number;
 }
 
 interface FeeStackSummary {
@@ -63,6 +62,15 @@ interface FeeStackSummary {
   maxEffectivePerfFee: number;
   avgEffectivePerfFee: number;
   totalStackedCapital: number;
+}
+
+/** Flatten a tree node into table rows with depth info */
+function flattenTree(node: FeeStackNode, depth: number, isLast: boolean): Array<{ node: FeeStackNode; depth: number; isLast: boolean }> {
+  const rows: Array<{ node: FeeStackNode; depth: number; isLast: boolean }> = [{ node, depth, isLast }];
+  node.children.forEach((child, i) => {
+    rows.push(...flattenTree(child, depth + 1, i === node.children.length - 1));
+  });
+  return rows;
 }
 
 const TIME_PRESETS = [
@@ -354,54 +362,116 @@ export function FeesPanel() {
               <div className="value">{feeStack.chains.length}</div>
             </div>
           </div>
-          <div className="table-scroll" style={{ maxHeight: 500, overflowY: "auto" }}>
+          <div className="table-scroll" style={{ maxHeight: 600, overflowY: "auto" }}>
             <table className={density === "compact" ? "density-compact" : ""}>
               <thead>
                 <tr>
-                  <th>Root Vault</th>
-                  <th>Chain</th>
-                  <th className="text-right">Depth</th>
-                  <th className="text-right">Effective Perf Fee</th>
-                  <th className="text-right">Effective Mgmt Fee</th>
+                  <th>Vault</th>
+                  <th className="text-right">Perf Fee</th>
+                  <th className="text-right">Mgmt Fee</th>
                   <th className="text-right">Capital</th>
+                  <th className="text-right">Effective</th>
                 </tr>
               </thead>
               <tbody>
-                {feeStack.chains.map((chain, idx) => (
-                  <Fragment key={`stack-${idx}`}>
-                    <tr
-                      onClick={() => setExpandedStack(expandedStack === idx ? null : idx)}
-                      style={{ cursor: "pointer" }}
-                    >
-                      <td>
-                        <span className="vault-name">
-                          {chain.rootVault.name?.slice(0, 28) || chain.rootVault.address.slice(0, 10)}
-                        </span>
-                        <span className="text-dim" style={{ marginLeft: 4, fontSize: "0.7rem" }}>
-                          {expandedStack === idx ? "\u25BC" : "\u25B6"}
-                        </span>
-                      </td>
-                      <td className="text-dim">{CHAIN_NAMES[chain.rootVault.chainId] || chain.rootVault.chainId}</td>
-                      <td className="text-right">{chain.depth}</td>
-                      <td className="text-right text-yellow">{bpsPct(chain.effectivePerfFee)}</td>
-                      <td className="text-right">{bpsPct(chain.effectiveMgmtFee)}</td>
-                      <td className="text-right">{fmt(chain.hops[0]?.capitalUsd || 0)}</td>
-                    </tr>
-                    {expandedStack === idx && chain.hops.map((hop, hi) => (
-                      <tr key={`stack-${idx}-hop-${hi}`} style={{ background: "rgba(255,255,255,0.02)" }}>
-                        <td style={{ paddingLeft: "2rem" }}>
-                          <span className="text-dim">{hi === 0 ? "\u2514" : "\u251C"}</span>{" "}
-                          {hop.vault.name?.slice(0, 24) || hop.vault.address.slice(0, 10)}
+                {feeStack.chains.map((chain, idx) => {
+                  const isOpen = expandedStack === idx;
+                  const rows = flattenTree(chain.root, 0, true);
+                  return (
+                    <Fragment key={`stack-${idx}`}>
+                      {/* Collapsed: summary row */}
+                      <tr
+                        onClick={() => setExpandedStack(isOpen ? null : idx)}
+                        style={{ cursor: "pointer" }}
+                      >
+                        <td>
+                          <span style={{ color: "var(--text-3)", marginRight: 6, fontSize: "0.7rem" }}>
+                            {isOpen ? "\u25BC" : "\u25B6"}
+                          </span>
+                          <span style={{ fontWeight: 600 }}>
+                            {chain.root.vault.name?.slice(0, 30) || chain.root.vault.address.slice(0, 10)}
+                          </span>
+                          <span className="text-dim" style={{ marginLeft: 6, fontSize: "0.7rem" }}>
+                            {CHAIN_NAMES[chain.root.vault.chainId] || chain.root.vault.chainId}
+                          </span>
                         </td>
-                        <td className="text-dim">{CHAIN_NAMES[hop.vault.chainId] || hop.vault.chainId}</td>
-                        <td className="text-right text-dim">hop {hi + 1}</td>
-                        <td className="text-right">{bpsPct(hop.perfFee)}</td>
-                        <td className="text-right">{bpsPct(hop.mgmtFee)}</td>
-                        <td className="text-right text-dim">{fmt(hop.capitalUsd)}</td>
+                        <td className="text-right">{bpsPct(chain.root.perfFee)}</td>
+                        <td className="text-right">{bpsPct(chain.root.mgmtFee)}</td>
+                        <td className="text-right">{fmt(chain.root.capitalUsd)}</td>
+                        <td className="text-right">
+                          <span className="text-yellow" style={{ fontWeight: 600 }}>{bpsPct(chain.effectivePerfFee)}</span>
+                          <span className="text-dim" style={{ fontSize: "0.7rem", marginLeft: 4 }}>
+                            depth {chain.maxDepth}
+                          </span>
+                        </td>
                       </tr>
-                    ))}
-                  </Fragment>
-                ))}
+                      {/* Expanded: tree rows */}
+                      {isOpen && rows.map(({ node, depth, isLast }, ri) => {
+                        const paddingLeft = 1.0 + depth * 1.6;
+                        const isRoot = depth === 0;
+                        return (
+                          <tr
+                            key={`stack-${idx}-${ri}`}
+                            style={{ background: `rgba(46, 230, 182, ${0.015 + depth * 0.015})` }}
+                          >
+                            <td style={{ paddingLeft: `${paddingLeft}rem` }}>
+                              <span className="text-dim" style={{ marginRight: 6, fontSize: "0.75rem" }}>
+                                {isRoot ? "\u25CB" : isLast ? "\u2514\u2500" : "\u251C\u2500"}
+                              </span>
+                              {!isRoot && (
+                                <span style={{ color: "var(--accent)", fontSize: "0.65rem", marginRight: 4, opacity: 0.6 }}>
+                                  \u2192
+                                </span>
+                              )}
+                              <span style={{ color: isRoot ? "var(--text)" : "var(--text-2)" }}>
+                                {node.vault.name?.slice(0, 28) || node.vault.address.slice(0, 10)}
+                              </span>
+                              {!isRoot && node.vault.chainId !== chain.root.vault.chainId && (
+                                <span className="text-dim" style={{ fontSize: "0.65rem", marginLeft: 4 }}>
+                                  ({CHAIN_NAMES[node.vault.chainId] || node.vault.chainId})
+                                </span>
+                              )}
+                            </td>
+                            <td className="text-right" style={{ color: node.perfFee > 0 ? "var(--text)" : "var(--text-3)" }}>
+                              {bpsPct(node.perfFee)}
+                            </td>
+                            <td className="text-right" style={{ color: node.mgmtFee > 0 ? "var(--text)" : "var(--text-3)" }}>
+                              {bpsPct(node.mgmtFee)}
+                            </td>
+                            <td className="text-right text-dim">{fmt(node.capitalUsd)}</td>
+                            <td className="text-right">
+                              {isRoot ? (
+                                <span className="text-dim" style={{ fontSize: "0.7rem" }}>root</span>
+                              ) : (
+                                <span className="text-dim" style={{ fontSize: "0.7rem" }}>
+                                  +{bpsPct(node.perfFee)} perf
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {/* Effective total row */}
+                      {isOpen && (
+                        <tr style={{ background: "rgba(46, 230, 182, 0.06)", borderTop: "1px solid var(--border)" }}>
+                          <td style={{ paddingLeft: "1rem" }}>
+                            <span style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                              Effective total
+                            </span>
+                          </td>
+                          <td className="text-right">
+                            <span className="text-yellow" style={{ fontWeight: 600 }}>{bpsPct(chain.effectivePerfFee)}</span>
+                          </td>
+                          <td className="text-right" style={{ fontWeight: 600 }}>{bpsPct(chain.effectiveMgmtFee)}</td>
+                          <td />
+                          <td className="text-right">
+                            <span className="text-dim" style={{ fontSize: "0.7rem" }}>compound</span>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

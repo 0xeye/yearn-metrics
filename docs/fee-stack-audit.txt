@@ -1,0 +1,87 @@
+# Fee Stacking Audit Report (post-fix)
+Generated: 2026-03-20T11:14:40.453Z
+Total chains: 13 | Max depth: 4
+Max eff perf: 34.4% | Avg: 18.7%
+
+---
+Effective perf: 34.39% | mgmt: 0.00% | depth: 4
+DAI-2 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$734.7K [2 children]
+  ├── USDS-1 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$514.4K [leaf]
+  └── DAI-1 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$220.4K [2 children]
+    ├── USDC-1 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$156.1K [1 children]
+      └── USDS-1 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$81.9K [leaf]
+    └── USDS-1 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$64.3K [leaf]
+
+---
+Effective perf: 27.10% | mgmt: 0.00% | depth: 3
+DAI-1 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$12.88M [2 children]
+  ├── USDC-1 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$9.12M [1 children]
+    └── USDS-1 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$4.78M [leaf]
+  └── USDS-1 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$3.76M [leaf]
+
+---
+Effective perf: 27.10% | mgmt: 0.00% | depth: 3
+USDC-2 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$1.11M [1 children]
+  └── USDC-1 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$114.7K [1 children]
+    └── USDS-1 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$60.2K [leaf]
+
+---
+Effective perf: 19.00% | mgmt: 0.00% | depth: 2
+USDC-1 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$31.14M [1 children]
+  └── USDS-1 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$16.34M [leaf]
+
+---
+Effective perf: 19.00% | mgmt: 0.00% | depth: 2
+WETH-2 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$1.81M [1 children]
+  └── WETH-1 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$216.2K [leaf]
+
+---
+Effective perf: 19.00% | mgmt: 0.00% | depth: 3
+WETH-2 yVault Liquid Locker Compounder (chain=1) perf=0.0% mgmt=0.0% capital=$167.5K [1 children]
+  └── WETH-2 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$177.4K [1 children]
+    └── WETH-1 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$21.2K [leaf]
+
+---
+Effective perf: 19.00% | mgmt: 0.00% | depth: 2
+USDC-2 yVault (chain=42161) perf=10.0% mgmt=0.0% capital=$130.3K [1 children]
+  └── USDC-1 yVault (chain=42161) perf=10.0% mgmt=0.0% capital=$24.0K [leaf]
+
+---
+Effective perf: 19.00% | mgmt: 0.00% | depth: 2
+USDC yVault-A (chain=137) perf=10.0% mgmt=0.0% capital=$83.8K [1 children]
+  └── USDC.e-1 yVault (chain=137) perf=10.0% mgmt=0.0% capital=$83.8K [leaf]
+
+---
+Effective perf: 19.00% | mgmt: 0.00% | depth: 2
+Yearn-Ajna WETH Vault (chain=1) perf=10.0% mgmt=0.0% capital=$24.8K [1 children]
+  └── WETH-1 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$24.7K [leaf]
+
+---
+Effective perf: 10.00% | mgmt: 0.00% | depth: 2
+Yearn yETH Recovery Vault (chain=1) perf=0.0% mgmt=0.0% capital=$5.48M [1 children]
+  └── WETH-1 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$5.48M [leaf]
+
+---
+Effective perf: 10.00% | mgmt: 0.00% | depth: 2
+WETH-1 yVault Liquid Locker Compounder (chain=1) perf=0.0% mgmt=0.0% capital=$4.3K [1 children]
+  └── WETH-1 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$4.5K [leaf]
+
+---
+Effective perf: 10.00% | mgmt: 0.00% | depth: 2
+crvUSD-2 yVault Liquid Locker Compounder (chain=1) perf=0.0% mgmt=0.0% capital=$1.4K [1 children]
+  └── crvUSD-2 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$1.4K [leaf]
+
+---
+Effective perf: 10.00% | mgmt: 0.00% | depth: 2
+USDS-1 yVault Liquid Locker Compounder (chain=1) perf=0.0% mgmt=0.0% capital=$0.2K [1 children]
+  └── USDS-1 yVault (chain=1) perf=10.0% mgmt=0.0% capital=$0.2K [leaf]
+
+
+# Audit Notes (from OpenAI o3 review)
+- All vault chains verified correct against raw strategy data
+- Compound perf fee math verified: 1 - product(1-fee_i) for each hop
+- Capital proportionality verified (downstream = root share)
+- Share ratio now capped at 1.0 to handle snapshot timing mismatches
+- USDS-1 correctly stops as leaf (all downstream are vaultType=2 execution strategies)
+- USDC-2 (type=2) as root is acceptable per Yearn architecture
+- Spark USDS Compounder registry entry targets vaultType=2, correctly skipped in fee chains
