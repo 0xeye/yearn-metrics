@@ -6,7 +6,7 @@
  */
 import { db, vaults, depositors } from "@yearn-tvl/db";
 import { eq, and, sql } from "drizzle-orm";
-import { KONG_API_URL, KongTransferRESTSchema, validateArray } from "@yearn-tvl/shared";
+import { KONG_API_URL, KongTransferRESTSchema, validateArray, retryWithBackoff } from "@yearn-tvl/shared";
 import type { KongTransferREST } from "@yearn-tvl/shared";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -32,12 +32,9 @@ const TRANSFERS_QUERY = `
   }
 `;
 
-const MAX_RETRIES = 3;
-const INITIAL_BACKOFF_MS = 1000;
-
 const fetchTransfers = async (chainId: number, vaultAddress: string): Promise<KongTransfer[]> => {
-  for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
-    try {
+  try {
+    return await retryWithBackoff(async () => {
       const res = await fetch(KONG_API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -47,17 +44,7 @@ const fetchTransfers = async (chainId: number, vaultAddress: string): Promise<Ko
         }),
       });
 
-      if (res.status === 429 || (res.status >= 500 && attempt <= MAX_RETRIES)) {
-        const backoff = INITIAL_BACKOFF_MS * 2 ** (attempt - 1);
-        console.warn(`  ${res.status} for ${vaultAddress.slice(0, 10)}, retrying in ${backoff}ms`);
-        await new Promise((r) => setTimeout(r, backoff));
-        continue;
-      }
-
-      if (!res.ok) {
-        console.warn(`  Kong API error for ${vaultAddress}: ${res.status}`);
-        return [];
-      }
+      if (!res.ok) throw new Error(`Kong API error: ${res.status}`);
 
       const json = (await res.json()) as { data?: { transfers?: unknown[] }; errors?: unknown[] };
       if (json.errors) {
@@ -67,17 +54,10 @@ const fetchTransfers = async (chainId: number, vaultAddress: string): Promise<Ko
 
       const raw = json.data?.transfers ?? [];
       return validateArray(raw, KongTransferRESTSchema, "KongTransfer");
-    } catch (err) {
-      if (attempt <= MAX_RETRIES) {
-        const backoff = INITIAL_BACKOFF_MS * 2 ** (attempt - 1);
-        await new Promise((r) => setTimeout(r, backoff));
-        continue;
-      }
-      console.warn(`  Failed fetching transfers for ${vaultAddress}: ${(err as Error).message}`);
-      return [];
-    }
+    }, { label: `fetchTransfers(${vaultAddress.slice(0, 10)})` });
+  } catch {
+    return [];
   }
-  return [];
 };
 
 const buildDepositorMap = (transfers: KongTransfer[]): Map<string, DepositorEntry> => {

@@ -1,6 +1,6 @@
-import { useEffect, useCallback, useState, useRef, type CSSProperties } from "react";
+import { useEffect, useState, useRef, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import { fmt, shortAddr, CHAIN_NAMES, EXPLORER_URLS } from "../hooks";
+import { fmt, shortAddr, CHAIN_NAMES, API_BASE } from "../hooks";
 
 interface UserVaultHolding {
   vaultAddress: string;
@@ -20,8 +20,6 @@ interface UserDrawerProps {
   address: string | null;
   onClose: () => void;
 }
-
-const API_BASE = import.meta.env.VITE_API_URL || "";
 
 const styles: Record<string, CSSProperties> = {
   backdrop: {

@@ -302,6 +302,7 @@ const DEPOSITOR_SORT_COLUMNS = {
   lastSeen: depositors.lastSeen,
 } as const;
 
+export const VALID_DEPOSITOR_SORTS = Object.keys(DEPOSITOR_SORT_COLUMNS);
 type DepositorSortKey = keyof typeof DEPOSITOR_SORT_COLUMNS;
 
 interface VaultDepositorsOpts {
@@ -334,7 +335,13 @@ export const getVaultDepositors = async (
   if (!vault) return { depositors: [], next: null };
 
   const sortCol = DEPOSITOR_SORT_COLUMNS[sortKey];
-  const orderFn = order === "asc" ? sql`ASC` : sql`DESC`;
+
+  // Get total vault balance for accurate percentages (not just page total)
+  const [totalRow] = await db
+    .select({ total: sql<number>`COALESCE(SUM(${depositors.balanceUsd}), 0)` })
+    .from(depositors)
+    .where(eq(depositors.vaultId, vault.id));
+  const vaultTotalUsd = totalRow?.total || 0;
 
   const rows = await db
     .select({
@@ -347,12 +354,10 @@ export const getVaultDepositors = async (
     .from(depositors)
     .where(eq(depositors.vaultId, vault.id))
     .orderBy(order === "asc" ? sql`${sortCol} ASC` : sql`${sortCol} DESC`)
-    .limit(limit + 1); // fetch one extra to detect next page
+    .limit(limit + 1);
 
   const hasMore = rows.length > limit;
   const pageRows = hasMore ? rows.slice(0, limit) : rows;
-
-  const totalUsd = pageRows.reduce((sum, r) => sum + (r.balanceUsd ?? 0), 0);
 
   const entries: DepositorEntry[] = pageRows.map((r) => ({
     address: r.address,
@@ -360,8 +365,8 @@ export const getVaultDepositors = async (
     balance: r.balance,
     firstSeen: r.firstSeen,
     lastSeen: r.lastSeen,
-    percentOfVault: totalUsd > 0
-      ? Math.round(((r.balanceUsd ?? 0) / totalUsd) * 10000) / 100
+    percentOfVault: vaultTotalUsd > 0
+      ? Math.round(((r.balanceUsd ?? 0) / vaultTotalUsd) * 10000) / 100
       : 0,
   }));
 
@@ -383,11 +388,6 @@ interface UserVaultHolding {
 export const getUserVaults = async (
   userAddress: string,
 ): Promise<{ address: string; totalBalanceUsd: number; holdings: UserVaultHolding[] }> => {
-  // Validate address format: 0x + 40 hex chars
-  if (!/^0x[0-9a-fA-F]{40}$/.test(userAddress)) {
-    return { address: userAddress, totalBalanceUsd: 0, holdings: [] };
-  }
-
   const rows = await db
     .select({
       vaultId: depositors.vaultId,

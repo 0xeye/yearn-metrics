@@ -492,8 +492,6 @@ if (import.meta.main) {
   const catArg = args.find((a) => a.startsWith("--category="));
   const category = catArg ? catArg.split("=")[1] as DisplayCat : undefined;
   const tableMode = args.includes("--table");
-  // Default to JSON unless --table is specified
-  const isJson = !tableMode;
 
   // Parse subcommand (first non-flag arg)
   const positional = args.filter((a) => !a.startsWith("--"));

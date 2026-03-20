@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 
-const API_BASE = import.meta.env.VITE_API_URL || "";
+export const API_BASE = import.meta.env.VITE_API_URL || "";
 
 // Simple in-memory cache for fetch responses
 const fetchCache = new Map<string, { data: unknown; timestamp: number }>();

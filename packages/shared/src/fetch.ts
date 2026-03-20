@@ -93,6 +93,34 @@ export async function fetchWithRetry(
   throw new Error(`All ${maxAttempts} attempts failed: ${url}`);
 }
 
+/**
+ * Generic retry wrapper with exponential backoff.
+ * Works with any async function (GraphQL POST, RPC calls, etc).
+ */
+export async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  opts?: { retries?: number; label?: string },
+): Promise<T> {
+  const maxAttempts = (opts?.retries ?? DEFAULT_RETRIES) + 1;
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err as Error;
+      if (attempt < maxAttempts) {
+        const backoff = INITIAL_BACKOFF_MS * 2 ** (attempt - 1);
+        const label = opts?.label || "request";
+        console.warn(`${label} failed: ${lastError.message}, retrying in ${backoff}ms (${attempt}/${maxAttempts - 1})`);
+        await sleep(backoff);
+      }
+    }
+  }
+
+  throw lastError ?? new Error("All retry attempts failed");
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

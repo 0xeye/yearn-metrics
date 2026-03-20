@@ -4,10 +4,10 @@
  * each vault takes fees. This service computes the effective compound fee
  * rate and total Yearn capture for each such chain.
  */
-import { db, feeConfigs } from "@yearn-tvl/db";
+import { db, vaults, feeConfigs } from "@yearn-tvl/db";
 import { eq, and } from "drizzle-orm";
 import type { FeeStackHop, FeeStackChain, FeeStackSummary } from "@yearn-tvl/shared";
-import { getAuditTree, type AuditVault, type AuditStrategy } from "./audit.js";
+import { getAuditTree, type AuditVault } from "./audit.js";
 import { latestFeeConfigIds } from "./queries.js";
 
 const MAX_DEPTH = 10;
@@ -17,12 +17,16 @@ interface FeeRate {
   managementFee: number;
 }
 
-/** Load latest fee configs for all vaults, keyed by vaultId */
-async function loadFeeRates(): Promise<Map<number, FeeRate>> {
+/**
+ * Load fee rates keyed by chainId:address (avoids needing vault IDs).
+ * Single query joins fee configs with vaults to get addresses directly.
+ */
+async function loadFeeRatesByAddress(): Promise<Map<string, FeeRate>> {
   const latestFees = latestFeeConfigIds();
   const rows = await db
     .select({
-      vaultId: feeConfigs.vaultId,
+      address: vaults.address,
+      chainId: vaults.chainId,
       performanceFee: feeConfigs.performanceFee,
       managementFee: feeConfigs.managementFee,
     })
@@ -30,29 +34,23 @@ async function loadFeeRates(): Promise<Map<number, FeeRate>> {
     .innerJoin(latestFees, and(
       eq(feeConfigs.vaultId, latestFees.vaultId),
       eq(feeConfigs.id, latestFees.maxId),
-    ));
+    ))
+    .innerJoin(vaults, eq(feeConfigs.vaultId, vaults.id));
 
   return new Map(rows.map((r) => [
-    r.vaultId,
+    `${r.chainId}:${r.address.toLowerCase()}`,
     { performanceFee: r.performanceFee || 0, managementFee: r.managementFee || 0 },
   ]));
 }
 
 /** Build a lookup map of chainId:address → AuditVault */
-function buildVaultLookup(vaults: AuditVault[]): Map<string, AuditVault> {
-  return new Map(vaults.map((v) => [`${v.chainId}:${v.address.toLowerCase()}`, v]));
-}
-
-/** Build a lookup map of chainId:address → vaultId (numeric) for fee config lookup */
-function buildVaultIdLookup(vaults: AuditVault[]): Map<string, number> {
-  // We don't have vaultId in AuditVault — use address-based fee lookup instead
-  // Actually the fee rates are keyed by vaultId which we don't have. Let's load them separately.
-  return new Map();
+function buildVaultLookup(auditVaults: AuditVault[]): Map<string, AuditVault> {
+  return new Map(auditVaults.map((v) => [`${v.chainId}:${v.address.toLowerCase()}`, v]));
 }
 
 /**
  * Walk from a root vault through strategy→vault chains, collecting fee hops.
- * Uses memoization + cycle detection via visited set.
+ * Uses cycle detection via visited set.
  */
 function walkChain(
   root: AuditVault,
@@ -67,13 +65,12 @@ function walkChain(
   }
 
   const hops: FeeStackHop[] = [];
-  const rootKey = `${root.chainId}:${root.address.toLowerCase()}`;
 
   for (const strat of root.strategies) {
     if (!strat.detectionMethod || !strat.targetVaultAddress) continue;
 
     const targetKey = `${strat.targetVaultChainId || root.chainId}:${strat.targetVaultAddress.toLowerCase()}`;
-    if (visited.has(targetKey)) continue; // cycle detection
+    if (visited.has(targetKey)) continue;
 
     const targetVault = vaultLookup.get(targetKey);
     if (!targetVault) continue;
@@ -91,7 +88,6 @@ function walkChain(
       capitalUsd: strat.debtUsd,
     });
 
-    // Recurse into the target vault
     visited.add(targetKey);
     const deeper = walkChain(targetVault, vaultLookup, feeByAddress, visited, depth + 1);
     hops.push(...deeper);
@@ -113,42 +109,26 @@ function additiveMgmtFee(hops: FeeStackHop[]): number {
 }
 
 export async function getFeeStackAnalysis(): Promise<FeeStackSummary> {
-  const auditTree = await getAuditTree();
+  const [auditTree, feeByAddress] = await Promise.all([
+    getAuditTree(),
+    loadFeeRatesByAddress(),
+  ]);
   const vaultLookup = buildVaultLookup(auditTree.vaults);
-
-  // Load fee rates keyed by vaultId, then build address-based lookup
-  const feeRatesById = await loadFeeRates();
-
-  // We need to map addresses to vault IDs. Load all vaults for this.
-  const allVaults = await db.query.vaults.findMany();
-  const vaultIdByAddress = new Map(
-    allVaults.map((v) => [`${v.chainId}:${v.address.toLowerCase()}`, v.id]),
-  );
-
-  // Build address → fee rate map
-  const feeByAddress = new Map<string, FeeRate>();
-  for (const [addrKey, vaultId] of vaultIdByAddress) {
-    const rate = feeRatesById.get(vaultId);
-    if (rate) feeByAddress.set(addrKey, rate);
-  }
 
   const chains: FeeStackChain[] = [];
 
   for (const vault of auditTree.vaults) {
-    // Only consider vaults that have strategies depositing into other vaults
     const hasOverlap = vault.strategies.some((s) => s.detectionMethod != null);
     if (!hasOverlap) continue;
 
     const rootKey = `${vault.chainId}:${vault.address.toLowerCase()}`;
     const rootFees = feeByAddress.get(rootKey) || { performanceFee: 0, managementFee: 0 };
 
-    // Start walk from root
     const visited = new Set<string>([rootKey]);
     const hops = walkChain(vault, vaultLookup, feeByAddress, visited, 0);
 
     if (hops.length === 0) continue;
 
-    // Include root vault as first hop
     const allHops: FeeStackHop[] = [
       {
         vault: { address: vault.address, chainId: vault.chainId, name: vault.name },
@@ -162,10 +142,7 @@ export async function getFeeStackAnalysis(): Promise<FeeStackSummary> {
     const depth = allHops.length;
     const effectivePerfFee = compoundPerfFee(allHops);
     const effectiveMgmtFee = additiveMgmtFee(allHops);
-
-    // Estimate total Yearn capture from this chain
-    // Use the root vault's capital × effective performance rate as rough estimate
-    const totalYearnCapture = vault.tvlUsd * (effectivePerfFee / 10000) * 0.1; // rough 10% gain assumption
+    const totalYearnCapture = vault.tvlUsd * (effectivePerfFee / 10000) * 0.1;
 
     chains.push({
       rootVault: { address: vault.address, chainId: vault.chainId, name: vault.name },
@@ -177,7 +154,6 @@ export async function getFeeStackAnalysis(): Promise<FeeStackSummary> {
     });
   }
 
-  // Sort by effective performance fee descending
   chains.sort((a, b) => b.effectivePerfFee - a.effectivePerfFee);
 
   const maxDepth = chains.reduce((m, c) => Math.max(m, c.depth), 0);
@@ -185,7 +161,7 @@ export async function getFeeStackAnalysis(): Promise<FeeStackSummary> {
   const avgEffectivePerfFee = chains.length > 0
     ? Math.round(chains.reduce((s, c) => s + c.effectivePerfFee, 0) / chains.length)
     : 0;
-  const totalStackedCapital = chains.reduce((s, c) => s + c.rootVault.address ? c.hops[0]?.capitalUsd || 0 : 0, 0);
+  const totalStackedCapital = chains.reduce((s, c) => s + (c.hops[0]?.capitalUsd || 0), 0);
 
   return {
     chains,

@@ -43,7 +43,7 @@ export function rateLimit(opts: RateLimitOpts = {}) {
   return async (c: Context, next: Next) => {
     const ip = getClientIp(c);
     const now = Date.now();
-    const key = `${ip}:${c.req.path}`;
+    const key = ip;
 
     let entry = store.get(key);
     if (!entry) {

@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useState, useRef, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import { fmt, pctFmt, shortAddr, CHAIN_NAMES, EXPLORER_URLS, CAT_COLORS } from "../hooks";
+import { fmt, pctFmt, shortAddr, CHAIN_NAMES, EXPLORER_URLS, CAT_COLORS, API_BASE } from "../hooks";
 
 export interface VaultDetail {
   address: string;
@@ -238,8 +238,6 @@ function vaultTypeLabel(vt: number | null): string {
 function bpsPctLabel(bps: number): string {
   return `${(bps / 100).toFixed(1)}%`;
 }
-
-const API_BASE = import.meta.env.VITE_API_URL || "";
 
 export function VaultDrawer({ vault, onClose, onDepositorClick }: VaultDrawerProps) {
   const [copied, setCopied] = useState(false);

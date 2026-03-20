@@ -6,6 +6,7 @@ import {
   getDepositorBreakdown,
   getVaultDepositors,
   getUserVaults,
+  VALID_DEPOSITOR_SORTS,
 } from "../services/analysis.js";
 import { rateLimit } from "../middleware/rate-limit.js";
 
@@ -41,9 +42,8 @@ analysis.get("/vault/:chainId/:address/depositors", async (c) => {
   const limit = Number(c.req.query("limit") || "50");
 
   // Whitelist sort parameter
-  const validSorts = ["balance", "balanceUsd", "firstSeen", "lastSeen"];
-  if (!validSorts.includes(sort)) {
-    return c.json({ error: `Invalid sort column. Valid: ${validSorts.join(", ")}` }, 400);
+  if (!VALID_DEPOSITOR_SORTS.includes(sort)) {
+    return c.json({ error: `Invalid sort column. Valid: ${VALID_DEPOSITOR_SORTS.join(", ")}` }, 400);
   }
 
   // Whitelist order parameter

@@ -1,4 +1,4 @@
-import { useState, useContext, useMemo } from "react";
+import { Fragment, useState, useContext, useMemo } from "react";
 import { DashboardContext } from "../App";
 import { useFetch, fmt, useSort, CHAIN_NAMES, CHART_COLORS, SkeletonCards, SkeletonChart, exportCSV, bpsPct } from "../hooks";
 import {
@@ -368,9 +368,8 @@ export function FeesPanel() {
               </thead>
               <tbody>
                 {feeStack.chains.map((chain, idx) => (
-                  <>
+                  <Fragment key={`stack-${idx}`}>
                     <tr
-                      key={`stack-${idx}`}
                       onClick={() => setExpandedStack(expandedStack === idx ? null : idx)}
                       style={{ cursor: "pointer" }}
                     >
@@ -401,7 +400,7 @@ export function FeesPanel() {
                         <td className="text-right text-dim">{fmt(hop.capitalUsd)}</td>
                       </tr>
                     ))}
-                  </>
+                  </Fragment>
                 ))}
               </tbody>
             </table>

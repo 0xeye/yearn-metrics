@@ -3,7 +3,7 @@
  * Categories: v2 (apiVersion 0.4.x) and v3 (v3=true). Curation vaults are NOT in Kong.
  */
 import { db, vaults, vaultSnapshots, strategies, strategyDebts, feeConfigs } from "@yearn-tvl/db";
-import { KONG_API_URL, IGNORED_VAULTS, fetchCurrentPrices, KongVaultRESTSchema, validateArray } from "@yearn-tvl/shared";
+import { KONG_API_URL, IGNORED_VAULTS, fetchCurrentPrices, KongVaultRESTSchema, validateArray, retryWithBackoff } from "@yearn-tvl/shared";
 import type { KongVault } from "@yearn-tvl/shared";
 import { eq, and } from "drizzle-orm";
 import { priceViaSugarOracle } from "./lib/velo-oracle.js";
@@ -38,63 +38,27 @@ const isIgnored = (address: string, chainId: number): boolean =>
     (v) => v.address.toLowerCase() === address.toLowerCase() && v.chainId === chainId
   );
 
-const MAX_RETRIES = 3;
-const INITIAL_BACKOFF_MS = 1000;
-
 const fetchKongVaults = async (): Promise<KongVault[]> => {
-  let lastError: Error | null = null;
+  return retryWithBackoff(async () => {
+    const res = await fetch(KONG_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: VAULTS_QUERY }),
+    });
 
-  for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
-    try {
-      const res = await fetch(KONG_API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: VAULTS_QUERY }),
-      });
-
-      if (res.status === 429) {
-        const retryAfter = res.headers.get("Retry-After");
-        const waitMs = retryAfter ? Number(retryAfter) * 1000 : INITIAL_BACKOFF_MS * 2 ** (attempt - 1);
-        if (attempt <= MAX_RETRIES) {
-          console.warn(`Rate limited (429), waiting ${waitMs}ms before retry ${attempt}/${MAX_RETRIES}`);
-          await new Promise((r) => setTimeout(r, waitMs));
-          continue;
-        }
-      }
-
-      if (!res.ok) {
-        if (res.status >= 500 && attempt <= MAX_RETRIES) {
-          const backoff = INITIAL_BACKOFF_MS * 2 ** (attempt - 1);
-          console.warn(`Server error ${res.status}, retrying in ${backoff}ms (${attempt}/${MAX_RETRIES})`);
-          await new Promise((r) => setTimeout(r, backoff));
-          continue;
-        }
-        throw new Error(`Kong API error: ${res.status} ${res.statusText}`);
-      }
-
-      const json = (await res.json()) as { data?: { vaults: unknown[] }; errors?: Array<{ message: string }> };
-      if (json.errors?.length) {
-        throw new Error(`Kong GraphQL errors: ${json.errors.map((e) => e.message).join(", ")}`);
-      }
-      if (!json.data?.vaults) {
-        throw new Error("Kong API returned no vault data");
-      }
-
-      // Validate response against Zod schema
-      const validated = validateArray(json.data.vaults, KongVaultRESTSchema, "KongVault");
-      console.log(`Validated ${validated.length}/${json.data.vaults.length} vaults`);
-      return validated as unknown as KongVault[];
-    } catch (err) {
-      lastError = err as Error;
-      if (attempt <= MAX_RETRIES) {
-        const backoff = INITIAL_BACKOFF_MS * 2 ** (attempt - 1);
-        console.warn(`Fetch error: ${lastError.message}, retrying in ${backoff}ms (${attempt}/${MAX_RETRIES})`);
-        await new Promise((r) => setTimeout(r, backoff));
-      }
+    if (!res.ok) throw new Error(`Kong API error: ${res.status} ${res.statusText}`);
+    const json = (await res.json()) as { data?: { vaults: unknown[] }; errors?: Array<{ message: string }> };
+    if (json.errors?.length) {
+      throw new Error(`Kong GraphQL errors: ${json.errors.map((e) => e.message).join(", ")}`);
     }
-  }
+    if (!json.data?.vaults) {
+      throw new Error("Kong API returned no vault data");
+    }
 
-  throw lastError ?? new Error("All fetch attempts failed");
+    const validated = validateArray(json.data.vaults, KongVaultRESTSchema, "KongVault");
+    console.log(`Validated ${validated.length}/${json.data.vaults.length} vaults`);
+    return validated as unknown as KongVault[];
+  }, { label: "fetchKongVaults" });
 };
 
 const upsertVault = async (kongVault: KongVault): Promise<number> => {
