@@ -1,6 +1,6 @@
 import { useState, useContext, useMemo } from "react";
 import { DashboardContext } from "../App";
-import { useFetch, fmt, useSort, CHAIN_NAMES, CHART_COLORS, SkeletonCards, SkeletonChart, exportCSV } from "../hooks";
+import { useFetch, fmt, useSort, CHAIN_NAMES, CHART_COLORS, SkeletonCards, SkeletonChart, exportCSV, bpsPct } from "../hooks";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Cell,
@@ -41,6 +41,30 @@ interface VaultFee {
   managementFee: number;
 }
 
+interface FeeStackHop {
+  vault: { address: string; chainId: number; name: string | null };
+  perfFee: number;
+  mgmtFee: number;
+  capitalUsd: number;
+}
+
+interface FeeStackChain {
+  rootVault: { address: string; chainId: number; name: string | null };
+  hops: FeeStackHop[];
+  depth: number;
+  effectivePerfFee: number;
+  effectiveMgmtFee: number;
+  totalYearnCapture: number;
+}
+
+interface FeeStackSummary {
+  chains: FeeStackChain[];
+  maxDepth: number;
+  maxEffectivePerfFee: number;
+  avgEffectivePerfFee: number;
+  totalStackedCapital: number;
+}
+
 const TIME_PRESETS = [
   { label: "7d", days: 7 },
   { label: "30d", days: 30 },
@@ -65,7 +89,9 @@ export function FeesPanel() {
   const { data: summary, loading: l1 } = useFetch<FeeSummary>(`/api/fees${sinceQ}`);
   const { data: history, loading: l2 } = useFetch<FeeHistory>("/api/fees/history?interval=monthly");
   const { data: vaultData, loading: l3 } = useFetch<{ count: number; vaults: VaultFee[] }>(`/api/fees/vaults${sinceQ}`);
+  const { data: feeStack } = useFetch<FeeStackSummary>("/api/fees/stack");
   const vaultSort = useSort("totalFeeRevenue");
+  const [expandedStack, setExpandedStack] = useState<number | null>(null);
 
   // Filter history buckets client-side by time range
   const filteredBuckets = useMemo(() => {
@@ -305,6 +331,83 @@ export function FeesPanel() {
           </div>
         </div>
       </div>
+
+      {/* ---- Fee Stacking Analysis ---- */}
+      {feeStack && feeStack.chains.length > 0 && (
+        <div className="card">
+          <h2>Fee Stacking</h2>
+          <div className="metric-grid" style={{ marginBottom: "1rem" }}>
+            <div className="metric">
+              <div className="label">Max Depth</div>
+              <div className="value">{feeStack.maxDepth}</div>
+            </div>
+            <div className="metric">
+              <div className="label">Max Effective Perf Fee</div>
+              <div className="value text-yellow">{bpsPct(feeStack.maxEffectivePerfFee)}</div>
+            </div>
+            <div className="metric">
+              <div className="label">Avg Effective Perf Fee</div>
+              <div className="value">{bpsPct(feeStack.avgEffectivePerfFee)}</div>
+            </div>
+            <div className="metric">
+              <div className="label">Stacked Chains</div>
+              <div className="value">{feeStack.chains.length}</div>
+            </div>
+          </div>
+          <div className="table-scroll" style={{ maxHeight: 500, overflowY: "auto" }}>
+            <table className={density === "compact" ? "density-compact" : ""}>
+              <thead>
+                <tr>
+                  <th>Root Vault</th>
+                  <th>Chain</th>
+                  <th className="text-right">Depth</th>
+                  <th className="text-right">Effective Perf Fee</th>
+                  <th className="text-right">Effective Mgmt Fee</th>
+                  <th className="text-right">Capital</th>
+                </tr>
+              </thead>
+              <tbody>
+                {feeStack.chains.map((chain, idx) => (
+                  <>
+                    <tr
+                      key={`stack-${idx}`}
+                      onClick={() => setExpandedStack(expandedStack === idx ? null : idx)}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <td>
+                        <span className="vault-name">
+                          {chain.rootVault.name?.slice(0, 28) || chain.rootVault.address.slice(0, 10)}
+                        </span>
+                        <span className="text-dim" style={{ marginLeft: 4, fontSize: "0.7rem" }}>
+                          {expandedStack === idx ? "\u25BC" : "\u25B6"}
+                        </span>
+                      </td>
+                      <td className="text-dim">{CHAIN_NAMES[chain.rootVault.chainId] || chain.rootVault.chainId}</td>
+                      <td className="text-right">{chain.depth}</td>
+                      <td className="text-right text-yellow">{bpsPct(chain.effectivePerfFee)}</td>
+                      <td className="text-right">{bpsPct(chain.effectiveMgmtFee)}</td>
+                      <td className="text-right">{fmt(chain.hops[0]?.capitalUsd || 0)}</td>
+                    </tr>
+                    {expandedStack === idx && chain.hops.map((hop, hi) => (
+                      <tr key={`stack-${idx}-hop-${hi}`} style={{ background: "rgba(255,255,255,0.02)" }}>
+                        <td style={{ paddingLeft: "2rem" }}>
+                          <span className="text-dim">{hi === 0 ? "\u2514" : "\u251C"}</span>{" "}
+                          {hop.vault.name?.slice(0, 24) || hop.vault.address.slice(0, 10)}
+                        </td>
+                        <td className="text-dim">{CHAIN_NAMES[hop.vault.chainId] || hop.vault.chainId}</td>
+                        <td className="text-right text-dim">hop {hi + 1}</td>
+                        <td className="text-right">{bpsPct(hop.perfFee)}</td>
+                        <td className="text-right">{bpsPct(hop.mgmtFee)}</td>
+                        <td className="text-right text-dim">{fmt(hop.capitalUsd)}</td>
+                      </tr>
+                    ))}
+                  </>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </>
   );
 }

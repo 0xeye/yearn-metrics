@@ -70,6 +70,31 @@ export interface DefillamaComparison {
   }>;
 }
 
+/** Fee stacking analysis types */
+export interface FeeStackHop {
+  vault: { address: string; chainId: number; name: string | null };
+  perfFee: number;      // bps
+  mgmtFee: number;      // bps
+  capitalUsd: number;   // debtUsd flowing into this vault
+}
+
+export interface FeeStackChain {
+  rootVault: { address: string; chainId: number; name: string | null };
+  hops: FeeStackHop[];
+  depth: number;
+  effectivePerfFee: number;   // compound bps
+  effectiveMgmtFee: number;   // additive bps
+  totalYearnCapture: number;  // estimated USD
+}
+
+export interface FeeStackSummary {
+  chains: FeeStackChain[];
+  maxDepth: number;
+  maxEffectivePerfFee: number;
+  avgEffectivePerfFee: number;
+  totalStackedCapital: number;
+}
+
 /** Raw Kong GraphQL vault response shape */
 export interface KongVault {
   address: string;
