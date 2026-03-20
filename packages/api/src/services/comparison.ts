@@ -52,12 +52,13 @@ export const getComparison = async (): Promise<DefillamaComparison> => {
   ]);
 
   const byChain = [...allChains]
-    .map((chain) => ({
-      chain,
-      ours: ourTvl.tvlByChain[chain] || 0,
-      defillama: (dlFinance[chain] || 0) + (dlCurating[chain] || 0),
-      difference: (ourTvl.tvlByChain[chain] || 0) - ((dlFinance[chain] || 0) + (dlCurating[chain] || 0)),
-    }))
+    .map((chain) => {
+      const raw = ourTvl.tvlByChain[chain] || 0;
+      const chainOverlap = (ourTvl.overlapByChain[chain] || 0) + (ourTvl.crossChainOverlapByChain[chain] || 0);
+      const ours = raw - chainOverlap;
+      const defillama = (dlFinance[chain] || 0) + (dlCurating[chain] || 0);
+      return { chain, ours, defillama, difference: ours - defillama };
+    })
     .filter((c) => c.ours > 0 || c.defillama > 0)
     .sort((a, b) => Math.abs(b.difference) - Math.abs(a.difference));
 

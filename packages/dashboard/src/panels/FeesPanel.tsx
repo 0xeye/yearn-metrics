@@ -1,9 +1,9 @@
 import { Fragment, useState, useContext, useMemo } from "react";
 import { DashboardContext } from "../App";
-import { useFetch, fmt, useSort, CHAIN_NAMES, CHAIN_SHORT, CHAIN_COLORS, SkeletonCards, SkeletonChart, bpsPct } from "../hooks";
+import { useFetch, fmt, pctFmt, shortAddr, useSort, CHAIN_NAMES, CHAIN_SHORT, CHAIN_COLORS, CAT_COLORS, SkeletonCards, SkeletonChart, bpsPct } from "../hooks";
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  CartesianGrid,
+  CartesianGrid, ScatterChart, Scatter, ZAxis, Cell,
 } from "recharts";
 
 interface FeeSummary {
@@ -64,6 +64,96 @@ interface FeeStackSummary {
   totalStackedCapital: number;
 }
 
+type Trend = "improving" | "declining" | "stable" | "insufficient_data";
+type PricingConfidence = "high" | "medium" | "low";
+type Quadrant = "high_tvl_high_yield" | "high_tvl_low_yield" | "low_tvl_high_yield" | "low_tvl_low_yield";
+
+interface VaultProfitability {
+  address: string;
+  chainId: number;
+  name: string | null;
+  category: string;
+  tvlUsd: number;
+  annualizedFeeRevenue: number;
+  feeYield: number;
+  feeCapture: number;
+  gainYield: number;
+  trend: Trend;
+  trendDelta: number;
+  pricingConfidence: PricingConfidence;
+  reportCount: number;
+  avgHarvestFrequencyDays: number;
+  performanceFee: number;
+  managementFee: number;
+  totalGainUsd: number;
+  totalFeeRevenue: number;
+  quadrant: Quadrant;
+  currentPeriodFeeYield: number;
+  previousPeriodFeeYield: number;
+}
+
+interface ProfitabilitySummary {
+  protocolFeeYield: number;
+  feeCaptureRate: number;
+  medianVaultFeeYield: number;
+  totalAnnualizedFees: number;
+  totalTvl: number;
+  vaultCount: number;
+  lastUpdated: string;
+  vaults: VaultProfitability[];
+  byChain: Array<{ chain: string; chainId: number; tvl: number; fees: number; feeYield: number; vaultCount: number }>;
+  byCategory: Array<{ category: string; tvl: number; fees: number; feeYield: number; vaultCount: number }>;
+  quadrants: Record<Quadrant, VaultProfitability[]>;
+  dataQuality: {
+    highConfidenceCount: number;
+    mediumConfidenceCount: number;
+    lowConfidenceCount: number;
+    reportsWithPricingSource: number;
+    totalReports: number;
+  };
+}
+
+const QUADRANT_LABELS: Record<Quadrant, { label: string; color: string; desc: string }> = {
+  high_tvl_high_yield: { label: "Cash Cows", color: "#0ecb81", desc: "Protect & maintain" },
+  high_tvl_low_yield: { label: "Optimize", color: "#f0b90b", desc: "Improve yield or migrate" },
+  low_tvl_high_yield: { label: "Scale Up", color: "#3b82f6", desc: "Drive more TVL" },
+  low_tvl_low_yield: { label: "Review", color: "#848e9c", desc: "Consider retirement" },
+};
+
+function trendIcon(t: string | undefined) {
+  if (t === "improving") return <span style={{ color: "var(--green)" }}>&#x25B2;</span>;
+  if (t === "declining") return <span style={{ color: "var(--red)" }}>&#x25BC;</span>;
+  if (t === "stable") return <span style={{ color: "var(--text-3)" }}>&#x25CF;</span>;
+  return <span style={{ color: "var(--text-3)" }}>-</span>;
+}
+
+function ScatterTooltip({ active, payload }: any) {
+  if (!active || !payload?.[0]?.payload) return null;
+  const v = payload[0].payload;
+  return (
+    <div style={{
+      background: "#151a23", border: "1px solid #1f2637", borderRadius: 8,
+      padding: "0.7rem 0.85rem", fontSize: "0.78rem", lineHeight: 1.6, minWidth: 180,
+    }}>
+      <div style={{ fontWeight: 600, marginBottom: 6, color: "var(--text)", fontSize: "0.82rem" }}>
+        {v.name || v.address?.slice(0, 10)}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
+        <span style={{ color: "var(--text-2)" }}>TVL</span>
+        <span style={{ color: "var(--text)" }}>{fmt(v.tvlUsd)}</span>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
+        <span style={{ color: "var(--text-2)" }}>Fee Yield</span>
+        <span style={{ color: "var(--accent)" }}>{pctFmt(v.feeYield)}</span>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
+        <span style={{ color: "var(--text-2)" }}>Fees (ann.)</span>
+        <span style={{ color: "var(--green)" }}>{fmt(v.annualizedFeeRevenue)}</span>
+      </div>
+    </div>
+  );
+}
+
 /** Flatten a tree node into table rows with depth info */
 /** Flatten tree to rows, filtering out dust (<$100) children */
 function flattenTree(node: FeeStackNode, depth: number, isLast: boolean): Array<{ node: FeeStackNode; depth: number; isLast: boolean }> {
@@ -100,8 +190,10 @@ export function FeesPanel() {
   const { data: history, loading: l2 } = useFetch<FeeHistory>("/api/fees/history?interval=monthly");
   const { data: vaultData, loading: l3 } = useFetch<{ count: number; vaults: VaultFee[] }>(`/api/fees/vaults${sinceQ}`);
   const { data: feeStack } = useFetch<FeeStackSummary>("/api/fees/stack");
+  const { data: profData } = useFetch<ProfitabilitySummary>("/api/profitability");
   const stackSort = useSort("feeCaptured");
   const [expandedStack, setExpandedStack] = useState<number | null>(null);
+  const [quadrantFilter, setQuadrantFilter] = useState<Quadrant | "all">("all");
 
   // Filter history buckets client-side by time range
   const filteredBuckets = useMemo(() => {
@@ -111,23 +203,89 @@ export function FeesPanel() {
     return history.buckets.filter((b) => new Date(b.period + "-01") >= sinceDate);
   }, [history, sinceTs]);
 
+  // Build a lookup map for vault fees from the time-filtered vaultData
+  const vaultFeeMap = useMemo(() => {
+    if (!vaultData) return new Map<string, VaultFee>();
+    const map = new Map<string, VaultFee>();
+    for (const v of vaultData.vaults) {
+      map.set(`${v.address.toLowerCase()}-${v.chainId}`, v);
+    }
+    return map;
+  }, [vaultData, sinceQ]);
+
+  // Build a lookup map for profitability trend data
+  const profTrendMap = useMemo(() => {
+    if (!profData) return new Map<string, string>();
+    const map = new Map<string, string>();
+    for (const v of profData.vaults) {
+      map.set(`${v.address.toLowerCase()}-${v.chainId}`, v.trend);
+    }
+    return map;
+  }, [profData]);
+
   const sortedStacks = useMemo(() => {
     if (!feeStack) return [];
-    type ChainWithFee = FeeStackChain & { feeCaptured: number };
-    const withFees: ChainWithFee[] = feeStack.chains.map((c) => ({
-      ...c,
-      feeCaptured: c.root.capitalUsd * (c.effectivePerfFee / 10000),
-    }));
+    type ChainWithFee = FeeStackChain & { feeCaptured: number; trend: string | undefined };
+    const withFees: ChainWithFee[] = feeStack.chains.map((c) => {
+      const key = `${c.root.vault.address.toLowerCase()}-${c.root.vault.chainId}`;
+      const matchedVault = vaultFeeMap.get(key);
+      const feeCaptured = matchedVault
+        ? matchedVault.totalFeeRevenue
+        : sinceTs != null ? 0 : c.root.capitalUsd * (c.effectivePerfFee / 10000);
+      return {
+        ...c,
+        feeCaptured,
+        trend: profTrendMap.get(key),
+      };
+    });
     return stackSort.sorted(withFees, {
       name: (c) => c.root.vault.name || "",
       perfFee: (c) => c.root.perfFee,
       feeCaptured: (c) => c.feeCaptured,
       effective: (c) => c.effectivePerfFee,
     });
-  }, [feeStack, stackSort.sortKey, stackSort.sortDir]);
+  }, [feeStack, vaultFeeMap, profTrendMap, stackSort.sortKey, stackSort.sortDir, sinceQ]);
 
-  if (l1 || l2 || l3) return <><SkeletonCards count={5} /><SkeletonChart /></>;
-  if (!summary || !history || !vaultData) return null;
+  const scatterData = useMemo(() => {
+    if (!profData) return [];
+    let eligible = profData.vaults.filter((v) => v.feeYield > 0 && v.tvlUsd >= 1e4 && v.tvlUsd <= 1e8);
+    if (quadrantFilter !== "all") eligible = eligible.filter((v) => v.quadrant === quadrantFilter);
+    if (eligible.length < 4) return eligible.map((v) => ({ ...v, logTvl: Math.log10(v.tvlUsd) }));
+    const yields = eligible.map((v) => v.feeYield).sort((a, b) => a - b);
+    const q1 = yields[Math.floor(yields.length * 0.25)];
+    const q3 = yields[Math.floor(yields.length * 0.75)];
+    const iqr = q3 - q1;
+    const upper = q3 + 1.5 * iqr;
+    return eligible
+      .filter((v) => v.feeYield <= upper)
+      .map((v) => ({ ...v, logTvl: Math.log10(v.tvlUsd) }));
+  }, [profData, quadrantFilter]);
+
+  const trendLine = useMemo(() => {
+    if (scatterData.length < 5) return null;
+    const n = scatterData.length;
+    let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
+    for (const p of scatterData) {
+      sumX += p.logTvl; sumY += p.feeYield; sumXY += p.logTvl * p.feeYield;
+      sumX2 += p.logTvl * p.logTvl; sumY2 += p.feeYield * p.feeYield;
+    }
+    const denom = n * sumX2 - sumX * sumX;
+    if (denom === 0) return null;
+    const slope = (n * sumXY - sumX * sumY) / denom;
+    const intercept = (sumY - slope * sumX) / n;
+    const denomR = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
+    const r2 = denomR === 0 ? 0 : Math.pow((n * sumXY - sumX * sumY) / denomR, 2);
+    if (r2 < 0.01) return null;
+    const xs = scatterData.map((p) => p.logTvl);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    return { points: [{ logTvl: minX, feeYield: slope * minX + intercept }, { logTvl: maxX, feeYield: slope * maxX + intercept }], r2 };
+  }, [scatterData]);
+
+  // Only show skeletons on initial load, not when switching time ranges
+  const hasData = summary && history && vaultData;
+  if (!hasData && (l1 || l2 || l3)) return <><SkeletonCards count={5} /><SkeletonChart /></>;
+  if (!hasData) return null;
 
   return (
     <>
@@ -176,64 +334,147 @@ export function FeesPanel() {
         </div>
       </div>
 
-      {/* ---- Fee History Area Chart ---- */}
-      <div className="card">
-        <h2>Monthly Fee Revenue &amp; Gains</h2>
-        <div className="chart-container" style={{ height: 320 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={filteredBuckets} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
-              <defs>
-                <linearGradient id="gradFees" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#0ecb81" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="#0ecb81" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="gradGains" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid stroke="#1f2637" strokeDasharray="3 3" />
-              <XAxis
-                dataKey="period"
-                tick={{ fill: "#5e6673", fontSize: 11 }}
-                interval={Math.max(0, Math.floor(filteredBuckets.length / 8) - 1)}
-                angle={-35}
-                textAnchor="end"
-                height={50}
-              />
-              <YAxis
-                tick={{ fill: "#5e6673", fontSize: 11 }}
-                tickFormatter={(v: number) => fmt(v, 0)}
-                width={60}
-              />
-              <Tooltip
-                contentStyle={{ background: "#151a23", border: "1px solid #1f2637", borderRadius: 8 }}
-                labelStyle={{ color: "#eaecef" }}
-                formatter={(value: number, name: string) => [
-                  fmt(value, 2),
-                  name === "performanceFeeRevenue" ? "Fee Revenue" : "Gains",
-                ]}
-                cursor={{ stroke: "rgba(46, 230, 182, 0.3)" }}
-              />
-              <Area
-                type="monotone"
-                dataKey="gains"
-                stroke="#3b82f6"
-                fill="url(#gradGains)"
-                strokeWidth={2}
-                name="gains"
-              />
-              <Area
-                type="monotone"
-                dataKey="performanceFeeRevenue"
-                stroke="#0ecb81"
-                fill="url(#gradFees)"
-                strokeWidth={2}
-                name="performanceFeeRevenue"
-              />
-            </AreaChart>
-          </ResponsiveContainer>
+      {/* ---- Charts Row: Fee History + Scatter ---- */}
+      <div className="row">
+        <div className="card">
+          <h2>Monthly Fee Revenue &amp; Gains</h2>
+          <div className="chart-container" style={{ height: 320 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={filteredBuckets} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+                <defs>
+                  <linearGradient id="gradFees" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#0ecb81" stopOpacity={0.3} />
+                    <stop offset="100%" stopColor="#0ecb81" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="gradGains" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.3} />
+                    <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="#1f2637" strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="period"
+                  tick={{ fill: "#5e6673", fontSize: 11 }}
+                  interval={Math.max(0, Math.floor(filteredBuckets.length / 8) - 1)}
+                  angle={-35}
+                  textAnchor="end"
+                  height={50}
+                />
+                <YAxis
+                  tick={{ fill: "#5e6673", fontSize: 11 }}
+                  tickFormatter={(v: number) => fmt(v, 0)}
+                  width={60}
+                />
+                <Tooltip
+                  contentStyle={{ background: "#151a23", border: "1px solid #1f2637", borderRadius: 8 }}
+                  labelStyle={{ color: "#eaecef" }}
+                  formatter={(value: number, name: string) => [
+                    fmt(value, 2),
+                    name === "performanceFeeRevenue" ? "Fee Revenue" : "Gains",
+                  ]}
+                  cursor={{ stroke: "rgba(46, 230, 182, 0.3)" }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="gains"
+                  stroke="#3b82f6"
+                  fill="url(#gradGains)"
+                  strokeWidth={2}
+                  name="gains"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="performanceFeeRevenue"
+                  stroke="#0ecb81"
+                  fill="url(#gradFees)"
+                  strokeWidth={2}
+                  name="performanceFeeRevenue"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
         </div>
+
+        {/* ---- TVL vs Fee Yield Scatter ---- */}
+        {profData && (
+          <div className="card">
+            <h2 style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+              TVL vs Fee Yield
+              {trendLine && (
+                <span style={{ fontSize: "0.75rem", color: "#f0b90b", fontWeight: 400 }}>
+                  R² = {trendLine.r2.toFixed(3)}
+                </span>
+              )}
+            </h2>
+            <div className="quadrant-legend">
+              {Object.entries(QUADRANT_LABELS).map(([key, { label, color, desc }]) => {
+                const count = profData.quadrants[key as Quadrant]?.length || 0;
+                const isActive = quadrantFilter === key;
+                return (
+                  <span
+                    key={key}
+                    className="quadrant-tag"
+                    style={{
+                      borderColor: color,
+                      color,
+                      cursor: "pointer",
+                      opacity: quadrantFilter === "all" || isActive ? 1 : 0.4,
+                      background: isActive ? `${color}15` : undefined,
+                    }}
+                    onClick={() => setQuadrantFilter(quadrantFilter === key ? "all" : key as Quadrant)}
+                  >
+                    {label} ({count}) <span style={{ color: "var(--text-3)", fontSize: "0.72rem" }}>{desc}</span>
+                  </span>
+                );
+              })}
+            </div>
+            <div className="chart-container" style={{ height: 320 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <ScatterChart margin={{ left: 20, right: 20, bottom: 24, top: 10 }}>
+                  <CartesianGrid stroke="#1f2637" strokeDasharray="3 3" />
+                  <XAxis
+                    type="number"
+                    dataKey="logTvl"
+                    name="TVL"
+                    domain={[4, 8]}
+                    ticks={[4, 5, 6, 7, 8]}
+                    tickFormatter={(v: number) => fmt(Math.pow(10, v), 0)}
+                    tick={{ fill: "#5e6673", fontSize: 11 }}
+                    label={{ value: "TVL (log scale)", position: "bottom", fill: "#5e6673", fontSize: 11, offset: 6 }}
+                    stroke="#1f2637"
+                    allowDataOverflow
+                  />
+                  <YAxis
+                    type="number"
+                    dataKey="feeYield"
+                    name="Fee Yield"
+                    tickFormatter={(v) => pctFmt(v)}
+                    tick={{ fill: "#5e6673", fontSize: 11 }}
+                    label={{ value: "Fee Yield (ann.)", angle: -90, position: "insideLeft", fill: "#5e6673", fontSize: 11 }}
+                    stroke="#1f2637"
+                  />
+                  <ZAxis type="number" dataKey="annualizedFeeRevenue" range={[30, 500]} name="Fees" />
+                  <Tooltip content={<ScatterTooltip />} cursor={false} />
+                  <Scatter data={scatterData}>
+                    {scatterData.map((v, i) => {
+                      const qColor = QUADRANT_LABELS[v.quadrant]?.color || "#848e9c";
+                      return <Cell key={i} fill={qColor} fillOpacity={0.65} stroke={qColor} strokeWidth={1} />;
+                    })}
+                  </Scatter>
+                  {trendLine && (
+                    <Scatter
+                      data={trendLine.points}
+                      line={{ stroke: "#f0b90b", strokeWidth: 2, strokeDasharray: "6 3" }}
+                      shape={() => <></>}
+                      isAnimationActive={false}
+                      legendType="none"
+                    />
+                  )}
+                </ScatterChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ---- Fee Analysis ---- */}
@@ -268,6 +509,7 @@ export function FeesPanel() {
                   <th {...stackSort.th("perfFee", "Perf Fee", "text-right")} />
                   <th {...stackSort.th("feeCaptured", "Fees Captured", "text-right")} />
                   <th {...stackSort.th("effective", "Effective", "text-right")} />
+                  <th style={{ textAlign: "center", width: 60 }}>Trend</th>
                 </tr>
               </thead>
               <tbody>
@@ -320,6 +562,7 @@ export function FeesPanel() {
                             depth {chain.maxDepth}
                           </span>
                         </td>
+                        <td style={{ textAlign: "center" }}>{trendIcon(chain.trend)}</td>
                       </tr>
                       {isOpen && rows.map(({ node, depth, isLast }, ri) => {
                         const paddingLeft = 1.0 + depth * 1.6;
@@ -375,6 +618,7 @@ export function FeesPanel() {
                                 </span>
                               )}
                             </td>
+                            <td />
                           </tr>
                         );
                       })}
@@ -394,6 +638,7 @@ export function FeesPanel() {
                           <td className="text-right">
                             <span className="text-dim" style={{ fontSize: "0.7rem" }}>weighted</span>
                           </td>
+                          <td />
                         </tr>
                       )}
                     </Fragment>
@@ -405,6 +650,7 @@ export function FeesPanel() {
         </div>
         );
       })()}
+
     </>
   );
 }

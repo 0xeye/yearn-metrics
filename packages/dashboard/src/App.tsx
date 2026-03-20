@@ -6,15 +6,13 @@ import "./styles.css";
 const TvlOverview = lazy(() => import("./panels/TvlOverview").then((m) => ({ default: m.TvlOverview })));
 const ComparisonPanel = lazy(() => import("./panels/ComparisonPanel").then((m) => ({ default: m.ComparisonPanel })));
 const FeesPanel = lazy(() => import("./panels/FeesPanel").then((m) => ({ default: m.FeesPanel })));
-const ProfitabilityPanel = lazy(() => import("./panels/ProfitabilityPanel").then((m) => ({ default: m.ProfitabilityPanel })));
 const AuditPanel = lazy(() => import("./panels/AuditPanel").then((m) => ({ default: m.AuditPanel })));
 
 const TABS = [
   { key: "Overview", icon: "\u25A3", label: "Overview" },
-  { key: "Comparison", icon: "\u21C4", label: "Comparison" },
   { key: "Fees", icon: "\u2234", label: "Fees" },
-  { key: "Profitability", icon: "\u2237", label: "Profitability" },
   { key: "Vaults", icon: "\u2263", label: "Vaults & Curation" },
+  { key: "Audit", icon: "\u21C4", label: "Audit" },
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
 
@@ -149,9 +147,8 @@ export const App = () => {
             <Suspense fallback={<PanelFallback />}>
               <div className="panel-enter" key={tab}>
                 {tab === "Overview" && <TvlOverview />}
-                {tab === "Comparison" && <ComparisonPanel />}
+                {tab === "Audit" && <ComparisonPanel />}
                 {tab === "Fees" && <FeesPanel />}
-                {tab === "Profitability" && <ProfitabilityPanel />}
                 {tab === "Vaults" && <AuditPanel />}
               </div>
             </Suspense>

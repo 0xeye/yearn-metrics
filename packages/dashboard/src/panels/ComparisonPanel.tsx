@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useFetch, fmt, pct, useSort, CHAIN_NAMES, SkeletonCards, SkeletonChart, exportCSV } from "../hooks";
+import { useFetch, fmt, pct, useSort, CHAIN_NAMES, SkeletonCards, SkeletonChart } from "../hooks";
 import {
   BarChart,
   Bar,
@@ -50,7 +50,6 @@ function diffPct(ours: number, dl: number): number {
 export function ComparisonPanel() {
   const { data, loading, error } = useFetch<Comparison>("/api/comparison");
   const catSort = useSort("ours");
-  const chainSort = useSort("ours");
 
   // All hooks must be called unconditionally (before any early returns)
   const chartData = useMemo(
@@ -80,22 +79,6 @@ export function ComparisonPanel() {
     [data],
   );
 
-  const sortedChains = useMemo(
-    () =>
-      data
-        ? chainSort.sorted(data.byChain, {
-            chain: (c) => CHAIN_NAMES[Number(c.chain)] || c.chain,
-            ours: (c) => c.ours, defillama: (c) => c.defillama,
-            diff: (c) => c.difference, diffPct: (c) => diffPct(c.ours, c.defillama),
-          })
-        : [],
-    [data, chainSort.sorted],
-  );
-
-  const chainMax = useMemo(
-    () => (data ? Math.max(...data.byChain.map((c) => Math.abs(c.difference)), 1) : 1),
-    [data],
-  );
 
   if (loading) return <><SkeletonCards count={4} /><SkeletonChart /></>;
   if (error) return <div className="error">Error: {error}</div>;
@@ -107,6 +90,8 @@ export function ComparisonPanel() {
 
   return (
     <>
+      <p className="text-dim" style={{ marginBottom: "1rem", fontSize: "0.82rem" }}>Comparing our internally-calculated TVL against DefiLlama's reported figures for yearn-finance and yearn-curating protocols.</p>
+
       {/* ── Metric Cards ── */}
       <div className="metric-grid">
         <div className="metric metric-accent">
@@ -177,9 +162,7 @@ export function ComparisonPanel() {
         </div>
       </div>
 
-      {/* ── Two-column: Category + Chain Tables ── */}
-      <div className="row">
-        {/* By Category */}
+      {/* ── By Category ── */}
         <div className="card">
           <h2>By Category</h2>
           <div className="table-scroll">
@@ -247,59 +230,6 @@ export function ComparisonPanel() {
           </div>
         </div>
 
-        {/* By Chain */}
-        <div className="card">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <h2>By Chain</h2>
-            <button className="btn-export" onClick={() => exportCSV("comparison-by-chain.csv", ["Chain", "Ours", "DefiLlama", "Delta", "Delta %"], sortedChains.map(c => [CHAIN_NAMES[Number(c.chain)] || c.chain, c.ours, c.defillama, c.difference, diffPct(c.ours, c.defillama).toFixed(1) + "%"]))}>Export CSV</button>
-          </div>
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th {...chainSort.th("chain", "Chain")} />
-                  <th {...chainSort.th("ours", "Ours", "text-right")} />
-                  <th {...chainSort.th("defillama", "DefiLlama", "text-right")} />
-                  <th {...chainSort.th("diff", "Delta", "text-right")} />
-                  <th {...chainSort.th("diffPct", "Delta %", "text-right")} />
-                  <th style={{ width: "100px" }}>Delta Bar</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedChains.map((c) => {
-                  const dp = diffPct(c.ours, c.defillama);
-                  const chainName = CHAIN_NAMES[Number(c.chain)] || c.chain;
-                  const barWidth = Math.min(Math.abs(c.difference) / chainMax * 100, 100);
-                  const isPositive = c.difference >= 0;
-                  return (
-                    <tr key={c.chain}>
-                      <td>{chainName}</td>
-                      <td className="text-right">{fmt(c.ours)}</td>
-                      <td className="text-right">{fmt(c.defillama)}</td>
-                      <td className={`text-right ${isPositive ? "text-green" : "text-red"}`}>
-                        {fmt(c.difference)}
-                      </td>
-                      <td className={`text-right ${dp >= 0 ? "text-green" : "text-red"}`}>
-                        {pct(dp)}
-                      </td>
-                      <td>
-                        <div className="inline-bar">
-                          <div className="inline-bar-track">
-                            <div
-                              className={`inline-bar-fill ${isPositive ? "fill-green" : "fill-red"}`}
-                              style={{ width: `${barWidth}%` }}
-                            />
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
     </>
   );
 }

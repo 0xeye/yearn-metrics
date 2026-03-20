@@ -16,9 +16,8 @@ interface PaletteItem {
 
 const NAV_ITEMS: PaletteItem[] = [
   { id: "Overview", label: "Overview", type: "navigation", icon: "\u{1F4CA}", hint: "TVL summary" },
-  { id: "Comparison", label: "Comparison", type: "navigation", icon: "\u{1F504}", hint: "vs DefiLlama" },
+  { id: "Audit", label: "Audit", type: "navigation", icon: "\u{1F504}", hint: "vs DefiLlama" },
   { id: "Fees", label: "Fees", type: "navigation", icon: "\u{1F4B0}", hint: "Fee revenue" },
-  { id: "Profitability", label: "Profitability", type: "navigation", icon: "\u{1F4C8}", hint: "Vault profitability" },
   { id: "Vaults", label: "Vaults", type: "navigation", icon: "\u{1F3E6}", hint: "Vault tree & overlaps" },
 ];
 

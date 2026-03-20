@@ -120,6 +120,13 @@ export const calculateTvl = async (): Promise<TvlSummary> => {
 
   const totalOverlap = overlaps.reduce((sum, o) => sum + o.overlapUsd, 0);
 
+  // Per-chain overlap (auto + registry)
+  const overlapByChain: Record<string, number> = {};
+  for (const o of overlaps) {
+    const chainName = CHAIN_NAMES[o.chainId] || `Chain ${o.chainId}`;
+    overlapByChain[chainName] = (overlapByChain[chainName] || 0) + o.overlapUsd;
+  }
+
   const initCat = (): Record<VaultCategory, number> => ({ v1: 0, v2: 0, v3: 0, curation: 0 });
 
   const agg = snapshots.reduce(
@@ -186,6 +193,13 @@ export const calculateTvl = async (): Promise<TvlSummary> => {
   );
   const crossChainOverlap = crossChainVaults.reduce((sum, { snapshot }) => sum + (snapshot.tvlUsd ?? 0), 0);
 
+  // Per-chain cross-chain overlap (deducted from source chain)
+  const crossChainOverlapByChain: Record<string, number> = {};
+  for (const { vault, snapshot } of crossChainVaults) {
+    const chainName = CHAIN_NAMES[vault.chainId] || `Chain ${vault.chainId}`;
+    crossChainOverlapByChain[chainName] = (crossChainOverlapByChain[chainName] || 0) + (snapshot.tvlUsd ?? 0);
+  }
+
   return {
     totalTvl: activeRaw + retiredRaw - totalOverlap - crossChainOverlap,
     activeTvl: activeRaw,
@@ -197,6 +211,8 @@ export const calculateTvl = async (): Promise<TvlSummary> => {
     overlapAmount: totalOverlap,
     crossChainOverlap,
     crossChainOverlapByCategory,
+    overlapByChain,
+    crossChainOverlapByChain,
     tvlByChain,
     tvlByCategory,
     retiredTvlByCategory,
