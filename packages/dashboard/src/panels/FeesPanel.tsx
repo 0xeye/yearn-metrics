@@ -178,11 +178,12 @@ export function FeesPanel() {
     if (fetchedAt) setLastFetchedAt(fetchedAt);
   }, [fetchedAt, setLastFetchedAt]);
 
-  // Filter history buckets client-side by time range
+  // Filter history buckets client-side by time range (never before 2024-01)
   const filteredBuckets = useMemo(() => {
     if (!history) return [];
-    if (sinceTs == null) return history.buckets;
-    const sinceDate = new Date(sinceTs * 1000);
+    const floor = new Date("2024-01-01");
+    if (sinceTs == null) return history.buckets.filter((b) => new Date(`${b.period}-01`) >= floor);
+    const sinceDate = new Date(Math.max(sinceTs * 1000, floor.getTime()));
     return history.buckets.filter((b) => new Date(`${b.period}-01`) >= sinceDate);
   }, [history, sinceTs]);
 
