@@ -41,12 +41,22 @@ DefiLlama's `yearn-curating` adapter dynamically discovers vaults by:
 **Hyperliquid:**
 - `0xec051b19d654C48c357dC974376DeB6272f24e53` (block 1988677)
 
-### Turtle Club Vaults (Ethereum only, hardcoded)
+### Extra Curation Vaults (hardcoded, multi-chain)
 
+Non-Morpho ERC4626 vaults and vaults whose ownership may have changed, kept as a hardcoded fallback.
+Defined in `EXTRA_CURATION_VAULTS` in `packages/shared/src/curation.ts`.
+
+**Turtle Club (Ethereum):**
 - `0xF470EB50B4a60c9b069F7Fd6032532B8F5cC014d`
 - `0xA5DaB32DbE68E6fa784e1e50e4f620a0477D3896`
 - `0xe1Ac97e2616Ad80f69f705ff007A4bbb3655544a`
-- `0x77570CfEcf83bc6bB08E2cD9e8537aeA9f97eA2F`
+- `0x77570CfEcf83bc6bB08E2cD9e8537aeA9F97eA2F`
+
+**ARM WETH (Ethereum):**
+- `0x3Dfe70B05657949A5dB340754aD664810ac63b21`
+
+**OUSD (Base):**
+- `0x581Cc9a73Ec7431723A4a80699B8f801205841F1`
 
 ## TVL Calculation
 
@@ -57,6 +67,10 @@ DefiLlama's `yearn-curating` adapter dynamically discovers vaults by:
    - Resolve underlying V1 via `adapter.morphoVaultV1()`
    - Get adapter share balance in V1: `V1.balanceOf(adapter)` → `V1.convertToAssets(shares)`
    - Subtract from combined total
+
+## Compounder / Curation Policy
+
+V3 compounders (from Kong) that deposit into Morpho curation vaults are **intentionally counted in both categories**. They represent different products — the compounder adds a yield optimization layer on top of the curated vault. Overlap detection explicitly skips curation vaults as targets to prevent accidental deduction.
 
 ## Key Notes
 

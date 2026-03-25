@@ -137,6 +137,11 @@ const main = async () => {
                 });
 
                 if (balance > 0n) {
+                  // Compounders depositing into curation vaults are separate products — skip
+                  if (vault.category === "curation") {
+                    console.log(`  [skip] ${strat.name || strat.address} → ${vault.name} (curation, not deducted)`);
+                    return;
+                  }
                   candidates.push({
                     strategyAddress: strat.address,
                     strategyName: strat.name,

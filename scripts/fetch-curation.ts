@@ -2,14 +2,14 @@
  * Fetch curation vault data from three sources:
  * 1. Morpho Blue API — primary vault discovery by owner/creator/curator address
  * 2. On-chain factory event scanning — catches vaults the API misses (matches DL behavior)
- * 3. Turtle Club on-chain reads (Ethereum ERC4626 vaults)
+ * 3. Extra curation vaults — hardcoded multi-chain fallback (Turtle Club, ARM, OUSD, etc.)
  *
  * For vaults discovered on-chain without USD pricing, falls back to DefiLlama
  * current token prices, then stablecoin assumptions.
  */
 
 import { db, vaultSnapshots, vaults } from "@yearn-tvl/db";
-import { CHAIN_PREFIXES, CURATION_CHAINS, TURTLE_CLUB_VAULTS, YEARN_CURATOR_OWNERS } from "@yearn-tvl/shared";
+import { CHAIN_PREFIXES, CURATION_CHAINS, EXTRA_CURATION_VAULTS, groupBy, YEARN_CURATOR_OWNERS } from "@yearn-tvl/shared";
 import { and, desc, eq } from "drizzle-orm";
 import { type Address, type Chain, createPublicClient, formatUnits, getAddress, http, type PublicClient, parseAbiItem } from "viem";
 import { arbitrum, base, mainnet } from "viem/chains";
@@ -258,22 +258,41 @@ const fetchMorphoVaultsOnChain = async (alreadyFound: Set<string>): Promise<Morp
   return chainResults;
 };
 
-// --- 3. Turtle Club on-chain reads (Ethereum only) ---
+// --- 3. Extra curation vaults (multi-chain hardcoded fallback) ---
 
-const fetchTurtleClubVaults = async (): Promise<MorphoVault[]> => {
-  const rpcUrl = process.env.RPC_URI_FOR_1 || process.env.ETH_RPC_URL;
-  const client = createPublicClient({ chain: mainnet, transport: http(rpcUrl) });
+const fetchExtraCurationVaults = async (): Promise<MorphoVault[]> => {
+  const byChain = groupBy(EXTRA_CURATION_VAULTS, (v) => v.chainId);
 
-  const results = await TURTLE_CLUB_VAULTS.reduce(
-    async (accPromise, address) => {
+  const chainResults = await [...byChain].reduce(
+    async (accPromise, [chainId, chainVaults]) => {
       const acc = await accPromise;
-      const vault = await readVaultOnChain(client, address, 1, "ethereum");
-      return vault ? [...acc, vault] : acc;
+      const rpcUrl = process.env[`RPC_URI_FOR_${chainId}`] || (chainId === 1 ? process.env.ETH_RPC_URL : undefined);
+      if (!rpcUrl) {
+        console.warn(`    No RPC for chain ${chainId}, skipping extra curation vaults`);
+        return acc;
+      }
+
+      const viemChain = CHAIN_MAP[chainId];
+      if (!viemChain) return acc;
+
+      const client = createPublicClient({ chain: viemChain, transport: http(rpcUrl) });
+      const chainName = viemChain.name.toLowerCase();
+
+      const results = await chainVaults.reduce(
+        async (innerAccPromise, entry) => {
+          const innerAcc = await innerAccPromise;
+          const vault = await readVaultOnChain(client, entry.address, chainId, chainName);
+          return vault ? [...innerAcc, vault] : innerAcc;
+        },
+        Promise.resolve([] as MorphoVault[]),
+      );
+
+      return [...acc, ...results];
     },
     Promise.resolve([] as MorphoVault[]),
   );
 
-  return results;
+  return chainResults;
 };
 
 // --- Price fallback: DefiLlama current prices for on-chain discovered vaults ---
@@ -403,13 +422,13 @@ export const fetchAndStoreCurationData = async () => {
   const factoryVaults = await fetchMorphoVaultsOnChain(foundKeys);
   console.log(`  [Factory scan] Found ${factoryVaults.length} additional vaults`);
 
-  // 3. Turtle Club — on-chain reads for Ethereum ERC4626 vaults not in Morpho
-  console.log("\n  [Turtle Club] Reading on-chain (Ethereum)...");
-  const turtleVaults = await fetchTurtleClubVaults();
-  console.log(`  [Turtle Club] Found ${turtleVaults.length} vaults`);
+  // 3. Extra curation vaults — hardcoded multi-chain fallback (Turtle Club, ARM, OUSD, etc.)
+  console.log("\n  [Extra vaults] Reading on-chain (multi-chain)...");
+  const extraVaults = await fetchExtraCurationVaults();
+  console.log(`  [Extra vaults] Found ${extraVaults.length} vaults`);
 
   // Merge, deduplicate by address+chainId
-  const allItems = [...morphoVaults, ...factoryVaults, ...turtleVaults];
+  const allItems = [...morphoVaults, ...factoryVaults, ...extraVaults];
   const allVaults = [...new Map(allItems.map((v) => [`${v.chain.id}:${v.address.toLowerCase()}`, v])).values()];
 
   // Price on-chain discovered vaults via DefiLlama

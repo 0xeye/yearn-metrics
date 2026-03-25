@@ -61,10 +61,30 @@ export const CURATION_CHAINS: CurationChainConfig[] = [
   },
 ];
 
-/** Turtle Club ERC4626 vaults on Ethereum — not from Morpho factories */
-export const TURTLE_CLUB_VAULTS: `0x${string}`[] = [
-  "0xF470EB50B4a60c9b069F7Fd6032532B8F5cC014d",
-  "0xA5DaB32DbE68E6fa784e1e50e4f620a0477D3896",
-  "0xe1Ac97e2616Ad80f69f705ff007A4bbb3655544a",
-  "0x77570CfEcf83bc6bB08E2cD9e8537aeA9F97eA2F",
+/**
+ * Extra curation vaults not discoverable via Morpho factories.
+ * Includes Turtle Club (Ethereum ERC4626) and other non-Morpho curated vaults.
+ * Used as a hardcoded fallback — the Morpho API may also discover these via creatorAddress.
+ */
+export interface ExtraCurationVault {
+  address: `0x${string}`;
+  chainId: number;
+  label: string;
+}
+
+export const EXTRA_CURATION_VAULTS: ExtraCurationVault[] = [
+  // Turtle Club (Ethereum)
+  { address: "0xF470EB50B4a60c9b069F7Fd6032532B8F5cC014d", chainId: 1, label: "Turtle Club" },
+  { address: "0xA5DaB32DbE68E6fa784e1e50e4f620a0477D3896", chainId: 1, label: "Turtle Club" },
+  { address: "0xe1Ac97e2616Ad80f69f705ff007A4bbb3655544a", chainId: 1, label: "Turtle Club" },
+  { address: "0x77570CfEcf83bc6bB08E2cD9e8537aeA9F97eA2F", chainId: 1, label: "Turtle Club" },
+  // ARM WETH (Ethereum) — also found via Morpho API creatorAddress
+  { address: "0x3Dfe70B05657949A5dB340754aD664810ac63b21", chainId: 1, label: "ARM WETH" },
+  // OUSD (Base) — also found via Morpho API creatorAddress
+  { address: "0x581Cc9a73Ec7431723A4a80699B8f801205841F1", chainId: 8453, label: "OUSD" },
 ];
+
+/** Turtle Club addresses only (Ethereum) — used by cross-chain overlap registry */
+export const TURTLE_CLUB_VAULTS: `0x${string}`[] = EXTRA_CURATION_VAULTS.filter((v) => v.chainId === 1 && v.label === "Turtle Club").map(
+  (v) => v.address,
+);

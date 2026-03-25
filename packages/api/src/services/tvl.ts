@@ -63,6 +63,9 @@ export const computeOverlap = async (): Promise<OverlapDetail[]> => {
         const targetVault = vaultByAddress.get(`${vault.chainId}:${strat.address.toLowerCase()}`);
         if (!targetVault) return null;
 
+        // Compounders depositing into curation vaults are separate products — don't deduct
+        if (targetVault.category === "curation") return null;
+
         const debtUsd = debtByStrategy.get(strat.id);
         if (!debtUsd || debtUsd <= 0) return null;
 
@@ -89,6 +92,9 @@ export const computeOverlap = async (): Promise<OverlapDetail[]> => {
 
     const targetVault = vaultByAddress.get(`${entry.chainId}:${entry.targetVaultAddress.toLowerCase()}`);
     if (!targetVault) return null;
+
+    // Compounders depositing into curation vaults are separate products — don't deduct
+    if (targetVault.category === "curation") return null;
 
     const strat = strategyByAddr.get(key);
     if (!strat) return null;

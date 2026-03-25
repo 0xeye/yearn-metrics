@@ -109,6 +109,7 @@ export const getComparison = async (): Promise<DefillamaComparison> => {
     v1Tvl > 1e6 && `$${(v1Tvl / 1e6).toFixed(0)}M in V1 legacy vaults not tracked by DL's adapter. Capital verified on-chain.`,
     curationDiff < -5e6 &&
       `Curation gap of $${(Math.abs(curationDiff) / 1e6).toFixed(0)}M — some Morpho vaults not discoverable without archive RPC for factory event scanning.`,
+    ourTvl.curationTvl > 1e6 && "V3 compounders depositing into curation vaults are counted in both categories (separate products).",
   ].filter((n): n is string => Boolean(n));
 
   // Structured gap components explaining the difference
