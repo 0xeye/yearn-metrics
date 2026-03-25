@@ -21,6 +21,7 @@ interface FeeHistory {
     period: string;
     gains: number;
     performanceFeeRevenue: number;
+    managementFeeRevenue: number;
     reportCount: number;
   }>;
 }
@@ -181,29 +182,20 @@ export function FeesPanel() {
   // Filter history buckets client-side by time range
   const filteredBuckets = useMemo(() => {
     if (!history) return [];
-    if (sinceTs == null) return history.buckets;
-    const sinceDate = new Date(sinceTs * 1000);
-    return history.buckets.filter((b) => new Date(`${b.period}-01`) >= sinceDate);
+    const cutoff = sinceTs != null ? new Date(sinceTs * 1000) : new Date("2024-01-01");
+    return history.buckets.filter((b) => new Date(`${b.period}-01`) >= cutoff);
   }, [history, sinceTs]);
 
   // Build a lookup map for vault fees from the time-filtered vaultData
   const vaultFeeMap = useMemo(() => {
     if (!vaultData) return new Map<string, VaultFee>();
-    const map = new Map<string, VaultFee>();
-    for (const v of vaultData.vaults) {
-      map.set(`${v.address.toLowerCase()}-${v.chainId}`, v);
-    }
-    return map;
+    return new Map(vaultData.vaults.map((v) => [`${v.address.toLowerCase()}-${v.chainId}`, v]));
   }, [vaultData, sinceQ]);
 
   // Build a lookup map for profitability trend data
   const profTrendMap = useMemo(() => {
     if (!profData) return new Map<string, string>();
-    const map = new Map<string, string>();
-    for (const v of profData.vaults) {
-      map.set(`${v.address.toLowerCase()}-${v.chainId}`, v.trend);
-    }
-    return map;
+    return new Map(profData.vaults.map((v) => [`${v.address.toLowerCase()}-${v.chainId}`, v.trend]));
   }, [profData]);
 
   const sortedStacks = useMemo(() => {
@@ -238,10 +230,10 @@ export function FeesPanel() {
 
   const scatterData = useMemo(() => {
     if (!profData) return [];
-    let eligible = profData.vaults
+    const base = profData.vaults
       .filter((v) => v.feeYield > 0 && v.tvlUsd >= 1e4 && v.tvlUsd <= 1e8)
       .filter((v) => chainFilter === "all" || String(v.chainId) === chainFilter);
-    if (quadrantFilter !== "all") eligible = eligible.filter((v) => v.quadrant === quadrantFilter);
+    const eligible = quadrantFilter !== "all" ? base.filter((v) => v.quadrant === quadrantFilter) : base;
     if (eligible.length < 4) return eligible.map((v) => ({ ...v, logTvl: Math.log10(v.tvlUsd) }));
     const yields = eligible.map((v) => v.feeYield).sort((a, b) => a - b);
     const q1 = yields[Math.floor(yields.length * 0.25)];
@@ -254,18 +246,16 @@ export function FeesPanel() {
   const trendLine = useMemo(() => {
     if (scatterData.length < 5) return null;
     const n = scatterData.length;
-    let sumX = 0,
-      sumY = 0,
-      sumXY = 0,
-      sumX2 = 0,
-      sumY2 = 0;
-    for (const p of scatterData) {
-      sumX += p.logTvl;
-      sumY += p.feeYield;
-      sumXY += p.logTvl * p.feeYield;
-      sumX2 += p.logTvl * p.logTvl;
-      sumY2 += p.feeYield * p.feeYield;
-    }
+    const { sumX, sumY, sumXY, sumX2, sumY2 } = scatterData.reduce(
+      (acc, p) => ({
+        sumX: acc.sumX + p.logTvl,
+        sumY: acc.sumY + p.feeYield,
+        sumXY: acc.sumXY + p.logTvl * p.feeYield,
+        sumX2: acc.sumX2 + p.logTvl * p.logTvl,
+        sumY2: acc.sumY2 + p.feeYield * p.feeYield,
+      }),
+      { sumX: 0, sumY: 0, sumXY: 0, sumX2: 0, sumY2: 0 },
+    );
     const denom = n * sumX2 - sumX * sumX;
     if (denom === 0) return null;
     const slope = (n * sumXY - sumX * sumY) / denom;
@@ -337,7 +327,7 @@ export function FeesPanel() {
         <div className="metric metric-yellow">
           <div className="label">Total Gains</div>
           <div className="value text-yellow">{fmt(summary.totalGains)}</div>
-          <div className="sub">{fmt(Math.abs(summary.totalLosses))} in losses</div>
+          <div className="sub">{summary.reportCount.toLocaleString()} harvest reports</div>
         </div>
         <div className="metric">
           <div className="label">Report Count</div>
@@ -358,6 +348,10 @@ export function FeesPanel() {
                     <stop offset="0%" stopColor="#0ecb81" stopOpacity={0.3} />
                     <stop offset="100%" stopColor="#0ecb81" stopOpacity={0} />
                   </linearGradient>
+                  <linearGradient id="gradMgmt" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#f0b90b" stopOpacity={0.3} />
+                    <stop offset="100%" stopColor="#f0b90b" stopOpacity={0} />
+                  </linearGradient>
                   <linearGradient id="gradGains" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.3} />
                     <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
@@ -376,7 +370,10 @@ export function FeesPanel() {
                 <Tooltip
                   contentStyle={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8 }}
                   labelStyle={{ color: "var(--text)" }}
-                  formatter={(value: number, name: string) => [fmt(value, 2), name === "performanceFeeRevenue" ? "Fee Revenue" : "Gains"]}
+                  formatter={(value: number, name: string) => [
+                    fmt(value, 2),
+                    name === "performanceFeeRevenue" ? "Performance Fees" : name === "managementFeeRevenue" ? "Management Fees" : "Gains",
+                  ]}
                   cursor={{ stroke: "rgba(46, 230, 182, 0.3)" }}
                 />
                 <Area type="monotone" dataKey="gains" stroke="#3b82f6" fill="url(#gradGains)" strokeWidth={2} name="gains" />
@@ -387,6 +384,14 @@ export function FeesPanel() {
                   fill="url(#gradFees)"
                   strokeWidth={2}
                   name="performanceFeeRevenue"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="managementFeeRevenue"
+                  stroke="#f0b90b"
+                  fill="url(#gradMgmt)"
+                  strokeWidth={2}
+                  name="managementFeeRevenue"
                 />
               </AreaChart>
             </ResponsiveContainer>
