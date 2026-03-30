@@ -350,6 +350,7 @@ const persistCurationVault = async (mv: MorphoVault) => {
           name: mv.name,
           category: "curation",
           source: "onchain",
+          isRetired: false,
           assetAddress: mv.asset.address,
           assetSymbol: mv.asset.symbol,
           assetDecimals: mv.asset.decimals,

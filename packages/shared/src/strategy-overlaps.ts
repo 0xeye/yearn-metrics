@@ -60,31 +60,9 @@ export const CROSS_CHAIN_OVERLAP_REGISTRY: CrossChainOverlap[] = [
     targetChainId: 747474,
     label: "Katana Pre-Deposit WBTC (v3)",
   },
-  // Turtle Club Katana Pre-Deposit vaults (curation)
-  {
-    sourceVaultAddress: "0xF470EB50B4a60c9b069F7Fd6032532B8F5cC014d",
-    sourceChainId: 1,
-    targetChainId: 747474,
-    label: "Katana Pre-Deposit USDC (curation)",
-  },
-  {
-    sourceVaultAddress: "0xA5DaB32DbE68E6fa784e1e50e4f620a0477D3896",
-    sourceChainId: 1,
-    targetChainId: 747474,
-    label: "Katana Pre-Deposit USDT (curation)",
-  },
-  {
-    sourceVaultAddress: "0xe1Ac97e2616Ad80f69f705ff007A4bbb3655544a",
-    sourceChainId: 1,
-    targetChainId: 747474,
-    label: "Katana Pre-Deposit WBTC (curation)",
-  },
-  {
-    sourceVaultAddress: "0x77570CfEcf83bc6bB08E2cD9e8537aeA9F97eA2F",
-    sourceChainId: 1,
-    targetChainId: 747474,
-    label: "Katana Pre-Deposit WETH (curation)",
-  },
+  // NOTE: Curation Katana Pre-Deposit vaults are intentionally NOT listed here.
+  // DL's yearn-curating adapter counts them as Ethereum TVL — deducting them
+  // would cause our curation total to fall below DL's reported figure.
 ];
 
 export const STRATEGY_OVERLAP_REGISTRY: StrategyOverlap[] = [
