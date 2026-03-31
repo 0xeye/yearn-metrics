@@ -8,6 +8,12 @@ import { CHAIN_NAMES } from "@yearn-tvl/shared";
 import { desc, eq } from "drizzle-orm";
 import { calculateTvl } from "./tvl.js";
 
+/** Normalize DL chain names to match our CHAIN_NAMES values */
+const DL_CHAIN_NAME_MAP: Record<string, string> = {
+  "Hyperliquid L1": "Hyperliquid",
+};
+const normalizeDlChain = (chain: string): string => DL_CHAIN_NAME_MAP[chain] ?? chain;
+
 const getLatestDefillamaData = async () => {
   const protocols = ["yearn-finance", "yearn-curating"] as const;
 
@@ -24,7 +30,7 @@ const getLatestDefillamaData = async () => {
       const latestTs = snapshots[0].timestamp;
       const chainTvl = snapshots
         .filter((s) => s.timestamp === latestTs && s.chain)
-        .reduce((acc, s) => ({ ...acc, [s.chain!]: s.tvlUsd ?? 0 }), {} as Record<string, number>);
+        .reduce((acc, s) => ({ ...acc, [normalizeDlChain(s.chain!)]: (acc[normalizeDlChain(s.chain!)] || 0) + (s.tvlUsd ?? 0) }), {} as Record<string, number>);
 
       return [protocol, chainTvl] as const;
     }),
@@ -106,7 +112,7 @@ export const getComparison = async (): Promise<DefillamaComparison> => {
     ourTvl.overlapAmount > 1e6 && `$${(ourTvl.overlapAmount / 1e6).toFixed(0)}M vault→vault overlap deducted to avoid double-counting.`,
     retiredV2 > 1e6 &&
       `$${(retiredV2 / 1e6).toFixed(0)}M in retired V2 vaults still holds real on-chain capital (users haven't withdrawn). DL's yearn-finance adapter likely no longer tracks these deprecated vaults, but the funds are verified on-chain.`,
-    v1Tvl > 1e6 && `$${(v1Tvl / 1e6).toFixed(0)}M in V1 legacy vaults not tracked by DL's adapter. Capital verified on-chain.`,
+    v1Tvl > 1e6 && `$${(v1Tvl / 1e6).toFixed(0)}M in V1 legacy vaults (DL includes these via getPricePerFullShare; TVL diff is pricing methodology).`,
     curationDiff < -5e6 &&
       `Curation gap of $${(Math.abs(curationDiff) / 1e6).toFixed(0)}M — some Morpho vaults not discoverable without archive RPC for factory event scanning.`,
     ourTvl.curationTvl > 1e6 && "V3 compounders depositing into curation vaults are counted in both categories (separate products).",
@@ -123,13 +129,8 @@ export const getComparison = async (): Promise<DefillamaComparison> => {
       explanation: "Deprecated V2 vaults still holding on-chain capital. DL's adapter likely no longer tracks these.",
     });
   }
-  if (v1Tvl > 1e5) {
-    gapComponents.push({
-      label: "V1 Legacy Vaults",
-      amount: v1Tvl,
-      explanation: "Hardcoded V1 vault list not tracked by DL's yearn-finance adapter. Capital verified on-chain.",
-    });
-  }
+  // V1 vaults are included by DL's adapter (via getPricePerFullShare).
+  // Any V1 TVL difference is pricing methodology, not a coverage gap.
   const retiredV3NonCC = (ourTvl.retiredTvlByCategory.v3 || 0) - (ourTvl.crossChainOverlapByCategory.v3 || 0);
   if (retiredV3NonCC > 1e5) {
     gapComponents.push({
