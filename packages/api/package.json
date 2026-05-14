@@ -7,7 +7,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "hono": "^4",
+    "hono": "4.12.7",
     "@yearn-tvl/db": "workspace:*",
     "@yearn-tvl/shared": "workspace:*"
   }

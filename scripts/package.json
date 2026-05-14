@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "graphql-request": "^7",
-    "viem": "^2",
+    "graphql-request": "7.4.0",
+    "viem": "2.47.1",
     "@yearn-tvl/db": "workspace:*",
     "@yearn-tvl/shared": "workspace:*"
   }

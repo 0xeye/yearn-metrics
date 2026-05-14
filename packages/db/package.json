@@ -7,11 +7,11 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "drizzle-orm": "^0.38",
+    "drizzle-orm": "0.38.4",
     "@yearn-tvl/shared": "workspace:*"
   },
   "devDependencies": {
-    "drizzle-kit": "^0.30"
+    "drizzle-kit": "0.30.6"
   },
   "scripts": {
     "generate": "drizzle-kit generate",
